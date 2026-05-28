@@ -149,6 +149,17 @@ WECHAT_APP_ID
 WECHAT_SECRET
 WECHAT_TOKEN
 WECHAT_AES_KEY
+REDIS_HOST
+REDIS_PORT
+REDIS_DB
+REDIS_PASSWORD
+```
+
+配置 `REDIS_HOST` 后，legacy 扫码登录会读写旧 Yii Redis 结构：
+
+```text
+open_id
+open_id:a:<Yii buildKey(token)>
 ```
 
 旧 Yii 里还暴露了 `/v1/wechat/test` 和 `/v1/wechat/the` 两个调试接口。新服务默认关闭它们，确实需要临时兼容验证时再设置：
@@ -164,8 +175,8 @@ AUTH_ENABLE_LEGACY_DEBUG_ENDPOINTS=true
 - `wechat`（旧 Yii 表，legacy 扫码登录继续读写）
 - `auth_users`
 - `auth_identities`
-- `auth_legacy_scan_tokens`
+- `auth_legacy_scan_tokens`（未配置 Redis 时的扫码 token 后备表）
 - `auth_oauth_authorization_codes`
 - `auth_oauth_refresh_tokens`
 
-旧 `/v1/wechat/refresh` 会按 `wechat.openid` 查旧绑定，`wechat.user_id` 有值返回 `signin`，否则返回 `signup`。
+旧 `/v1/wechat/refresh` 会先按旧 Redis 的 `token -> openid` 找扫码用户，再按 `wechat.openid` 查旧绑定；`wechat.user_id` 有值返回 `signin`，否则返回 `signup`。

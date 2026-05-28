@@ -41,7 +41,7 @@
 - HTTP: Express 或 Fastify。若追求最小迁移成本，Express 足够；若新项目从零做，也可选 Fastify。
 - DB: 腾讯云 TDSQL-C MySQL。
 - DB Access: Prisma 或 `mysql2`。如果团队要标准 migration，推荐 Prisma；如果要最少依赖，`mysql2` 也可以。
-- Cache: Redis 可选。旧流程的扫码 token 可存在 MySQL，Redis 后续用于 session 和限流。
+- Cache: Redis 可选。配置 `REDIS_HOST` 后，旧流程的扫码 `token -> openid` 会读写 Yii 旧 Redis 结构。
 - Token: Access Token + Refresh Token。
 - OAuth: Authorization Code + PKCE。
 - Deploy: Docker + GitHub Actions + Portainer + Traefik。
@@ -287,9 +287,27 @@ github
 google
 ```
 
+### Legacy Redis open_id
+
+兼容旧扫码轮询。旧 Yii 的 `OpenId` 是 `yii\redis\ActiveRecord`，主键为 `token`，Redis 结构为：
+
+```text
+open_id
+open_id:a:<Yii buildKey(token)>
+```
+
+hash 字段：
+
+```text
+token
+openid
+```
+
+`Yii buildKey(token)` 对 32 字节以内的纯字母数字 token 直接使用原值，其它 token 使用 md5。
+
 ### auth_legacy_scan_tokens
 
-兼容旧扫码轮询。
+未配置 Redis 时的扫码 token 后备表。
 
 ```text
 token                varchar primary key
@@ -561,6 +579,7 @@ docker buildx build --push -t ...:latest .
 - [ ] 实现 `POST /v1/wechat` 事件接收。
 - [ ] 实现 `GET /v1/wechat/refresh`。
 - [ ] 保持 `success/message/token` 返回结构。
+- [ ] 使用旧 Redis `open_id` 保存 legacy 扫码 token。
 - [ ] 使用旧 `wechat` 表保存 legacy 登录 token 和账号绑定。
 - [ ] 在 `auth-next.bujiaban.com` 灰度验证。
 - [ ] 切换 `auth.bujiaban.com` 到新服务。

@@ -46,6 +46,7 @@ export function createApp(config: AuthServiceConfig, store: AuthStore, wechat: W
       service: 'unified-auth-service',
       timestamp: new Date().toISOString(),
       database: config.databaseUrl ? 'mysql' : 'memory',
+      redis: config.redis ? 'configured' : 'disabled',
       wechatOfficialAppIdConfigured: Boolean(config.wechat.officialAppId),
       wechatOfficialSecretConfigured: Boolean(config.wechat.officialAppSecret),
     });
@@ -72,6 +73,6 @@ export function createApp(config: AuthServiceConfig, store: AuthStore, wechat: W
 
 function createStore(config: AuthServiceConfig): AuthStore {
   return config.databaseUrl
-    ? new MySqlAuthStore(config.databaseUrl, { autoMigrate: config.databaseAutoMigrate })
+    ? new MySqlAuthStore(config.databaseUrl, { autoMigrate: config.databaseAutoMigrate, legacyRedis: config.redis })
     : new MemoryAuthStore();
 }

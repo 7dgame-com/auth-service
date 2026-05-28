@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import type { FieldPacket, Pool, PoolOptions, QueryResult, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { randomUUID } from 'crypto';
+import type { RedisConfig } from './config';
 import type {
   AuthIdentity,
   AuthIdentityProvider,
@@ -15,6 +16,7 @@ import type {
 } from './types';
 import type { AuthStore } from './store';
 import { randomToken } from './crypto';
+import { LegacyRedisOpenIdStore } from './legacy-redis';
 
 interface MySqlQueryable {
   execute<T extends QueryResult = RowDataPacket[]>(sql: string, values?: any): Promise<[T, FieldPacket[]]>;
@@ -22,6 +24,7 @@ interface MySqlQueryable {
 
 export interface MySqlAuthStoreOptions {
   autoMigrate?: boolean;
+  legacyRedis?: RedisConfig;
 }
 
 interface UserRow extends RowDataPacket {
@@ -92,10 +95,12 @@ interface OAuthRefreshTokenRow extends RowDataPacket {
 export class MySqlAuthStore implements AuthStore {
   private migrationPromise: Promise<void> | undefined;
   private readonly autoMigrate: boolean;
+  private readonly legacyRedis?: LegacyRedisOpenIdStore;
   private readonly pool: Pool;
 
   constructor(databaseUrl: string, options: MySqlAuthStoreOptions = {}) {
     this.autoMigrate = options.autoMigrate ?? true;
+    this.legacyRedis = options.legacyRedis ? new LegacyRedisOpenIdStore(options.legacyRedis) : undefined;
     this.pool = mysql.createPool(createPoolOptions(databaseUrl));
   }
 
@@ -105,6 +110,11 @@ export class MySqlAuthStore implements AuthStore {
   }
 
   async saveLegacyScanToken(token: LegacyScanToken): Promise<void> {
+    if (this.legacyRedis) {
+      await this.legacyRedis.saveOpenId(token.token, token.openId);
+      return;
+    }
+
     await this.ensureSchema();
     await this.pool.execute(
       `
@@ -131,6 +141,19 @@ export class MySqlAuthStore implements AuthStore {
   }
 
   async findLegacyScanToken(token: string): Promise<LegacyScanToken | undefined> {
+    if (this.legacyRedis) {
+      const openId = await this.legacyRedis.findOpenId(token);
+      if (!openId) return undefined;
+      const now = new Date().toISOString();
+      return {
+        token,
+        providerAppId: 'legacy-redis',
+        openId,
+        expiresAt: '9999-12-31T23:59:59.999Z',
+        createdAt: now,
+      };
+    }
+
     await this.ensureSchema();
     const [rows] = await this.pool.execute<LegacyScanTokenRow[]>(
       `

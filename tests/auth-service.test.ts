@@ -3,6 +3,7 @@ import type { AddressInfo } from 'net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createConfig } from '../src/config';
 import { createWechatMessageSignature, decryptWechatMessage, encryptWechatMessage } from '../src/crypto';
+import { yiiRedisOpenIdKey } from '../src/legacy-redis';
 import { createApp } from '../src/server';
 import { MemoryAuthStore } from '../src/memory-store';
 import { WechatClient } from '../src/wechat-client';
@@ -30,13 +31,28 @@ describe('unified auth service', () => {
       WECHAT_APP_ID: 'wx-legacy',
       WECHAT_SECRET: 'wechat-secret',
       WECHAT_TOKEN: 'wechat-token',
+      REDIS_HOST: '10.0.0.6',
+      REDIS_PORT: '6380',
+      REDIS_DB: '2',
+      REDIS_PASSWORD: 'redis-pass',
     });
 
     expect(config.databaseUrl).toBe('mysql://legacy-user:legacy-pass@10.0.0.5:3307/bujiaban');
+    expect(config.redis).toEqual({ host: '10.0.0.6', port: 6380, database: 2, password: 'redis-pass' });
     expect(config.tokenSecret).toBe('legacy-jwt-secret');
     expect(config.wechat.officialAppId).toBe('wx-legacy');
     expect(config.wechat.officialAppSecret).toBe('wechat-secret');
     expect(config.wechat.officialToken).toBe('wechat-token');
+  });
+
+  it('matches Yii Redis ActiveRecord keys for legacy scan tokens', () => {
+    expect(yiiRedisOpenIdKey('abc123')).toBe('open_id:a:abc123');
+    expect(yiiRedisOpenIdKey('token-with-dash')).toBe(
+      `open_id:a:${crypto.createHash('md5').update('token-with-dash').digest('hex')}`
+    );
+    expect(yiiRedisOpenIdKey('a'.repeat(33))).toBe(
+      `open_id:a:${crypto.createHash('md5').update('a'.repeat(33)).digest('hex')}`
+    );
   });
 
   it('preserves the legacy qrcode, event push, and refresh flow', async () => {

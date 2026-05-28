@@ -11,12 +11,22 @@ export interface WechatConfig {
   signatureRequired: boolean;
 }
 
+export interface RedisConfig {
+  host: string;
+  port: number;
+  database: number;
+  tls?: boolean;
+  username?: string;
+  password?: string;
+}
+
 export interface AuthServiceConfig {
   host: string;
   port: number;
   publicBaseUrl: string;
   corsOrigins: string[];
   databaseUrl?: string;
+  redis?: RedisConfig;
   databaseAutoMigrate: boolean;
   tokenSecret: string;
   accessTokenTtlSeconds: number;
@@ -40,6 +50,7 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
     publicBaseUrl,
     corsOrigins: readCsv(env, 'AUTH_CORS_ORIGINS', [publicBaseUrl, 'https://bujiaban.com', 'https://3dugc.com']),
     databaseUrl: readDatabaseUrl(env),
+    redis: readRedisConfig(env),
     databaseAutoMigrate: readBoolean(env, 'AUTH_DATABASE_AUTO_MIGRATE', false),
     tokenSecret: readTokenSecret(env),
     accessTokenTtlSeconds: readNumber(env, 'AUTH_ACCESS_TOKEN_TTL_SECONDS', 15 * 60),
@@ -119,6 +130,37 @@ function readDatabaseUrl(env: NodeJS.ProcessEnv): string | undefined {
   const port = readOptionalString(env, 'MYSQL_PORT') || '3306';
   const credentials = `${encodeURIComponent(username)}:${encodeURIComponent(password || '')}`;
   return `mysql://${credentials}@${host}:${port}/${encodeURIComponent(database)}`;
+}
+
+function readRedisConfig(env: NodeJS.ProcessEnv): RedisConfig | undefined {
+  const redisUrl = readOptionalString(env, 'AUTH_REDIS_URL') || readOptionalString(env, 'REDIS_URL');
+  if (redisUrl) {
+    const url = new URL(redisUrl);
+    if (url.protocol !== 'redis:' && url.protocol !== 'rediss:') {
+      throw new Error(`Unsupported Redis URL protocol: ${url.protocol}`);
+    }
+    const useTls = url.protocol === 'rediss:';
+    return {
+      host: url.hostname,
+      port: url.port ? Number(url.port) : 6379,
+      database: Math.max(0, Number(url.pathname.replace(/^\//, '') || '0')),
+      ...(useTls ? { tls: true } : {}),
+      username: url.username ? decodeURIComponent(url.username) : undefined,
+      password: url.password ? decodeURIComponent(url.password) : undefined,
+    };
+  }
+
+  const host = readOptionalString(env, 'REDIS_HOST');
+  if (!host) return undefined;
+  const database = readNumber(env, 'REDIS_DB', 0);
+  return {
+    host,
+    port: readNumber(env, 'REDIS_PORT', 6379),
+    database: Math.max(0, database),
+    tls: readBoolean(env, 'AUTH_REDIS_TLS', readBoolean(env, 'REDIS_TLS', false)) || undefined,
+    username: readOptionalString(env, 'REDIS_USERNAME'),
+    password: readOptionalString(env, 'REDIS_PASSWORD'),
+  };
 }
 
 function readString(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
