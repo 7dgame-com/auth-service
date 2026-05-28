@@ -7,12 +7,14 @@ import type {
   AuthUser,
   LegacyLoginToken,
   LegacyScanToken,
+  LegacyWechatLoginResult,
   OAuthAuthorizationCode,
   OAuthRefreshToken,
   UpsertIdentityResult,
   WechatProfile,
 } from './types';
 import type { AuthStore } from './store';
+import { randomToken } from './crypto';
 
 interface MySqlQueryable {
   execute<T extends QueryResult = RowDataPacket[]>(sql: string, values?: any): Promise<[T, FieldPacket[]]>;
@@ -52,6 +54,16 @@ interface LegacyScanTokenRow extends RowDataPacket {
   expires_at: string | Date;
   consumed_at: string | Date | null;
   created_at: string | Date;
+}
+
+interface LegacyWechatRow extends RowDataPacket {
+  id: number;
+  openid: string;
+  unionid: string | null;
+  user_id: number | null;
+  token: string | null;
+  created_at: string | Date | null;
+  updated_at: string | Date | null;
 }
 
 interface OAuthAuthorizationCodeRow extends RowDataPacket {
@@ -172,6 +184,64 @@ export class MySqlAuthStore implements AuthStore {
       await upsertIdentity(connection, identity);
       await connection.commit();
       return { user, identity, isNewIdentity: true };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async completeLegacyWechatLogin(profile: WechatProfile): Promise<LegacyWechatLoginResult> {
+    await this.ensureSchema();
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [rows] = await connection.execute<LegacyWechatRow[]>(
+        'SELECT * FROM wechat WHERE openid = ? LIMIT 1 FOR UPDATE',
+        [profile.openId]
+      );
+      const token = randomToken(32);
+      const now = mysqlDateTime(new Date());
+      const existing = rows[0];
+
+      if (existing) {
+        await connection.execute<ResultSetHeader>(
+          `
+            UPDATE wechat
+            SET
+              token = ?,
+              unionid = COALESCE(unionid, ?),
+              updated_at = ?
+            WHERE id = ?
+          `,
+          [token, profile.unionId || null, now, existing.id]
+        );
+        await connection.commit();
+        return {
+          openId: existing.openid,
+          unionId: existing.unionid || profile.unionId || undefined,
+          userId: existing.user_id == null ? undefined : String(existing.user_id),
+          token,
+          isRegistered: existing.user_id != null,
+        };
+      }
+
+      await connection.execute<ResultSetHeader>(
+        `
+          INSERT INTO wechat
+            (openid, unionid, user_id, token, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `,
+        [profile.openId, profile.unionId || null, null, token, now, now]
+      );
+      await connection.commit();
+      return {
+        openId: profile.openId,
+        unionId: profile.unionId,
+        token,
+        isRegistered: false,
+      };
     } catch (error) {
       await connection.rollback();
       throw error;
@@ -335,6 +405,22 @@ function createPoolOptions(databaseUrl: string): PoolOptions {
 }
 
 async function runMigrations(client: MySqlQueryable): Promise<void> {
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS wechat (
+      id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+      openid VARCHAR(255) NOT NULL,
+      unionid VARCHAR(255),
+      user_id INT,
+      token VARCHAR(255),
+      created_at DATETIME,
+      updated_at DATETIME,
+      UNIQUE KEY wechat_openid_idx (openid),
+      UNIQUE KEY wechat_unionid_idx (unionid),
+      UNIQUE KEY wechat_token_idx (token),
+      KEY idx_wechat_user_id (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci
+  `);
+
   await client.execute(`
     CREATE TABLE IF NOT EXISTS auth_users (
       id VARCHAR(128) PRIMARY KEY,

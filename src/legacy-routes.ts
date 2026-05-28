@@ -5,7 +5,6 @@ import {
   decryptWechatMessage,
   encryptWechatMessage,
   randomToken,
-  sha256Base64Url,
   verifyWechatMessageSignature,
   verifyWechatSignature,
 } from './crypto';
@@ -60,23 +59,12 @@ export function createLegacyWechatRouter(config: AuthServiceConfig, store: AuthS
     }
 
     const profile = await wechat.getOfficialUserInfo(scanToken.openId);
-    const result = await store.upsertWechatIdentity(profile);
-    const loginToken = randomToken(32);
-    const now = new Date();
-    await store.createLegacyLoginToken({
-      tokenHash: sha256Base64Url(loginToken),
-      userId: result.user.id,
-      providerAppId: profile.providerAppId,
-      openId: profile.openId,
-      unionId: profile.unionId,
-      expiresAt: addSeconds(now, config.legacyLoginTokenTtlSeconds),
-      createdAt: now.toISOString(),
-    });
+    const result = await store.completeLegacyWechatLogin(profile);
 
     res.json({
       success: true,
-      message: result.isNewIdentity ? 'signup' : 'signin',
-      token: loginToken,
+      message: result.isRegistered ? 'signin' : 'signup',
+      token: result.token,
     });
   }));
 

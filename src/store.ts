@@ -2,6 +2,7 @@ import type {
   AuthUser,
   LegacyLoginToken,
   LegacyScanToken,
+  LegacyWechatLoginResult,
   OAuthAuthorizationCode,
   OAuthRefreshToken,
   UpsertIdentityResult,
@@ -13,6 +14,7 @@ export interface AuthStore {
   saveLegacyScanToken(token: LegacyScanToken): Promise<void>;
   findLegacyScanToken(token: string): Promise<LegacyScanToken | undefined>;
   upsertWechatIdentity(profile: WechatProfile): Promise<UpsertIdentityResult>;
+  completeLegacyWechatLogin(profile: WechatProfile): Promise<LegacyWechatLoginResult>;
   createLegacyLoginToken(token: LegacyLoginToken): Promise<void>;
   createAuthorizationCode(code: OAuthAuthorizationCode): Promise<void>;
   consumeAuthorizationCode(codeHash: string): Promise<OAuthAuthorizationCode | undefined>;

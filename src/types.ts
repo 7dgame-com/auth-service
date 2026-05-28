@@ -43,6 +43,14 @@ export interface LegacyLoginToken {
   createdAt: string;
 }
 
+export interface LegacyWechatLoginResult {
+  openId: string;
+  unionId?: string;
+  userId?: string;
+  token: string;
+  isRegistered: boolean;
+}
+
 export interface OAuthClient {
   clientId: string;
   clientSecret?: string;

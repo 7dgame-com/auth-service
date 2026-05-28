@@ -5,17 +5,27 @@ import type {
   AuthUser,
   LegacyLoginToken,
   LegacyScanToken,
+  LegacyWechatLoginResult,
   OAuthAuthorizationCode,
   OAuthRefreshToken,
   UpsertIdentityResult,
   WechatProfile,
 } from './types';
 import { AuthStore, isFuture } from './store';
+import { randomToken } from './crypto';
+
+interface LegacyWechatRow {
+  openId: string;
+  unionId?: string;
+  userId?: string;
+  token?: string;
+}
 
 export class MemoryAuthStore implements AuthStore {
   private readonly users = new Map<string, AuthUser>();
   private readonly identities = new Map<string, AuthIdentity>();
   private readonly scanTokens = new Map<string, LegacyScanToken>();
+  private readonly legacyWechatRows = new Map<string, LegacyWechatRow>();
   private readonly legacyLoginTokens = new Map<string, LegacyLoginToken>();
   private readonly authorizationCodes = new Map<string, OAuthAuthorizationCode>();
   private readonly refreshTokens = new Map<string, OAuthRefreshToken>();
@@ -70,6 +80,29 @@ export class MemoryAuthStore implements AuthStore {
     };
     this.identities.set(identityKey, identity);
     return { user, identity, isNewIdentity: true };
+  }
+
+  async completeLegacyWechatLogin(profile: WechatProfile): Promise<LegacyWechatLoginResult> {
+    const existing = this.legacyWechatRows.get(profile.openId);
+    const token = randomToken(32);
+    const row: LegacyWechatRow = {
+      openId: profile.openId,
+      unionId: existing?.unionId || profile.unionId,
+      userId: existing?.userId,
+      token,
+    };
+    this.legacyWechatRows.set(profile.openId, row);
+    return {
+      openId: row.openId,
+      unionId: row.unionId,
+      userId: row.userId,
+      token,
+      isRegistered: Boolean(row.userId),
+    };
+  }
+
+  seedLegacyWechatUser(openId: string, userId = '1', unionId?: string): void {
+    this.legacyWechatRows.set(openId, { openId, userId, unionId });
   }
 
   async createLegacyLoginToken(token: LegacyLoginToken): Promise<void> {

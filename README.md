@@ -161,11 +161,11 @@ AUTH_ENABLE_LEGACY_DEBUG_ENDPOINTS=true
 
 核心表：
 
+- `wechat`（旧 Yii 表，legacy 扫码登录继续读写）
 - `auth_users`
 - `auth_identities`
 - `auth_legacy_scan_tokens`
-- `auth_legacy_login_tokens`
 - `auth_oauth_authorization_codes`
 - `auth_oauth_refresh_tokens`
 
-旧 `wechat.openid/unionid/user_id` 后续可以导入到 `auth_identities`，再通过 `unionid` 合并到 `auth_users`。
+旧 `/v1/wechat/refresh` 会按 `wechat.openid` 查旧绑定，`wechat.user_id` 有值返回 `signin`，否则返回 `signup`。

@@ -301,19 +301,18 @@ consumed_at nullable
 created_at
 ```
 
-### auth_legacy_login_tokens
+### wechat
 
-兼容旧站登录 token。
+兼容旧 Yii 登录绑定表，legacy `/v1/wechat/refresh` 优先读写这张表，保证旧账号不会被当成新注册。
 
 ```text
-token_hash           varchar primary key
-user_id              varchar
-provider_app_id      varchar
-openid               varchar
-unionid              varchar nullable
-expires_at
-revoked_at nullable
+id                   int primary key
+openid               varchar unique
+unionid              varchar unique nullable
+user_id              int nullable
+token                varchar unique nullable
 created_at
+updated_at
 ```
 
 ### oauth_clients
@@ -562,7 +561,7 @@ docker buildx build --push -t ...:latest .
 - [ ] 实现 `POST /v1/wechat` 事件接收。
 - [ ] 实现 `GET /v1/wechat/refresh`。
 - [ ] 保持 `success/message/token` 返回结构。
-- [ ] 使用 MySQL 保存扫码 token 和 legacy login token。
+- [ ] 使用旧 `wechat` 表保存 legacy 登录 token 和账号绑定。
 - [ ] 在 `auth-next.bujiaban.com` 灰度验证。
 - [ ] 切换 `auth.bujiaban.com` 到新服务。
 - [ ] 保留旧 Yii2 容器回滚窗口。

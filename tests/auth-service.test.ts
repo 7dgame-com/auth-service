@@ -47,7 +47,8 @@ describe('unified auth service', () => {
       AUTH_WECHAT_OFFICIAL_APP_ID: 'wx-test',
       AUTH_TOKEN_SECRET: 'test-secret',
     });
-    const app = await startApp(config, new MemoryAuthStore());
+    const store = new MemoryAuthStore();
+    const app = await startApp(config, store);
 
     const qrcodeResponse = await fetch(`${app.baseUrl}/v1/wechat/qrcode`);
     const qrcode = await qrcodeResponse.json() as { success: boolean; message: string; token: string };
@@ -67,6 +68,7 @@ describe('unified auth service', () => {
     expect(refresh.message).toBe('signup');
     expect(refresh.token).toBeTruthy();
 
+    store.seedLegacyWechatUser('openid-1', '42');
     const secondRefreshResponse = await fetch(`${app.baseUrl}/v1/wechat/refresh?token=${encodeURIComponent(qrcode.token)}`);
     const secondRefresh = await secondRefreshResponse.json() as { success: boolean; message: string; token: string };
     expect(secondRefresh.success).toBe(true);
