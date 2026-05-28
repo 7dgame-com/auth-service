@@ -1,6 +1,6 @@
 services:
   auth:
-    image: hkccr.ccs.tencentyun.com/services/auth-service:latest
+    image: hkccr.ccs.tencentyun.com/plugins/auth-service:latest
     networks:
       - proxy
     labels:

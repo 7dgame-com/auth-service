@@ -31,7 +31,7 @@ Deploy runs on pushes to `main`, `develop`, and `publish`, and supports manual `
 Before pushing an image it runs the same build and test commands as CI. If validation passes, it builds the service Docker image and pushes it to:
 
 ```text
-hkccr.ccs.tencentyun.com/services/auth-service
+hkccr.ccs.tencentyun.com/plugins/auth-service
 ```
 
 Required GitHub Actions secrets:
@@ -51,11 +51,11 @@ Required GitHub Actions secrets:
 The Portainer compose template uses the Tencent Cloud image:
 
 ```text
-hkccr.ccs.tencentyun.com/services/auth-service:latest
+hkccr.ccs.tencentyun.com/plugins/auth-service:latest
 ```
 
 Use branch tags for environment-specific deployments:
 
-- Development: `hkccr.ccs.tencentyun.com/services/auth-service:develop`
-- Stable: `hkccr.ccs.tencentyun.com/services/auth-service:main`
-- Release: `hkccr.ccs.tencentyun.com/services/auth-service:publish` or `:latest`
+- Development: `hkccr.ccs.tencentyun.com/plugins/auth-service:develop`
+- Stable: `hkccr.ccs.tencentyun.com/plugins/auth-service:main`
+- Release: `hkccr.ccs.tencentyun.com/plugins/auth-service:publish` or `:latest`

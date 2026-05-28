@@ -7,7 +7,7 @@ on:
 
 env:
   TENCENT_REGISTRY: hkccr.ccs.tencentyun.com
-  TENCENT_IMAGE_NAME: services/auth-service
+  TENCENT_IMAGE_NAME: plugins/auth-service
 
 jobs:
   validate:

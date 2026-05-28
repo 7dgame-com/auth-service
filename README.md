@@ -66,7 +66,7 @@ CI 和部署工作流位于 `.github/workflows/`，规则见 [DEPLOYMENT.md](DEP
 GitHub Actions 发布到腾讯云 TCR：
 
 ```text
-hkccr.ccs.tencentyun.com/services/auth-service
+hkccr.ccs.tencentyun.com/plugins/auth-service
 ```
 
 需要在 GitHub 仓库配置：
@@ -84,7 +84,7 @@ TENCENT_REGISTRY_PASSWORD
 
 ```yaml
 auth:
-  image: hkccr.ccs.tencentyun.com/services/auth-service:<tag>
+  image: hkccr.ccs.tencentyun.com/plugins/auth-service:<tag>
   networks:
     - proxy
   labels:

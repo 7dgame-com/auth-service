@@ -45,7 +45,7 @@
 - Token: Access Token + Refresh Token。
 - OAuth: Authorization Code + PKCE。
 - Deploy: Docker + GitHub Actions + Portainer + Traefik。
-- Image: `hkccr.ccs.tencentyun.com/services/auth-service:latest`。
+- Image: `hkccr.ccs.tencentyun.com/plugins/auth-service:latest`。
 
 ## 5. 域名与部署形态
 
@@ -444,7 +444,7 @@ REDIS_DB
 ```yaml
 services:
   auth:
-    image: hkccr.ccs.tencentyun.com/services/auth-service:latest
+    image: hkccr.ccs.tencentyun.com/plugins/auth-service:latest
     networks:
       - proxy
     labels:
@@ -516,14 +516,14 @@ CI 模仿 `7dgame-com/ar-slam` 的三分支发布模型，推送分支标签，�
 分支与镜像标签：
 
 ```text
-develop -> hkccr.ccs.tencentyun.com/services/auth-service:develop
-main    -> hkccr.ccs.tencentyun.com/services/auth-service:main
-publish -> hkccr.ccs.tencentyun.com/services/auth-service:publish
-publish -> hkccr.ccs.tencentyun.com/services/auth-service:latest
+develop -> hkccr.ccs.tencentyun.com/plugins/auth-service:develop
+main    -> hkccr.ccs.tencentyun.com/plugins/auth-service:main
+publish -> hkccr.ccs.tencentyun.com/plugins/auth-service:publish
+publish -> hkccr.ccs.tencentyun.com/plugins/auth-service:latest
 ```
 
 ```text
-hkccr.ccs.tencentyun.com/services/auth-service
+hkccr.ccs.tencentyun.com/plugins/auth-service
 ```
 
 GitHub Secrets：
