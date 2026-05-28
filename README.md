@@ -130,11 +130,34 @@ AUTH_PUBLIC_BASE_URL=https://auth.bujiaban.com
 AUTH_DATABASE_URL=mysql://user:pass@host:3306/db
 AUTH_DATABASE_AUTO_MIGRATE=true
 AUTH_TOKEN_SECRET=<random-secret-or-private-key-content>
+AUTH_LOGIN_ENTRIES_JSON='[{"slug":"bujiaban","clientId":"bujiaban-web","defaultRedirectUri":"https://bujiaban.com/auth/callback","allowedReturnUrlPrefixes":["https://bujiaban.com/"],"defaultScopes":["openid","profile"],"provider":"wechat_official_account","displayName":"不加班"}]'
 AUTH_WECHAT_OFFICIAL_APP_ID=wx...
 AUTH_WECHAT_OFFICIAL_APP_SECRET=...
 AUTH_WECHAT_OFFICIAL_TOKEN=...
 AUTH_WECHAT_OFFICIAL_AES_KEY=
 ```
+
+## 多 URL 登录入口
+
+标准 OAuth 入口 `/oauth/authorize` 继续可用。为了让业务站少拼 OAuth 参数，也可以配置短登录入口：
+
+```text
+GET /login/:slug
+```
+
+示例：
+
+```text
+https://auth.bujiaban.com/login/bujiaban?return_to=https%3A%2F%2Fbujiaban.com%2Fdashboard&state=client-state&code_challenge=...&code_challenge_method=S256
+```
+
+服务会根据 `slug` 找到对应 OAuth client、默认 `redirect_uri`、scope 和登录方式。登录成功后回跳业务 callback：
+
+```text
+https://bujiaban.com/auth/callback?code=...&state=client-state&return_to=https%3A%2F%2Fbujiaban.com%2Fdashboard
+```
+
+`redirect_uri` 仍然必须精确匹配 OAuth client 白名单；`return_to` 只允许匹配 `allowedReturnUrlPrefixes`，不能传任意外部 URL。
 
 兼容旧变量：
 

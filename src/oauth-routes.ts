@@ -12,13 +12,16 @@ import {
 } from './crypto';
 import type { AuthStore } from './store';
 import { addSeconds } from './store';
-import type { AuthUser, OAuthAuthorizationCode, OAuthClient } from './types';
+import type { AuthUser, LoginEntry, OAuthAuthorizationCode, OAuthClient } from './types';
 import type { WechatClient } from './wechat-client';
 
 interface OAuthAuthorizeState extends Record<string, unknown> {
   clientId: string;
   redirectUri: string;
   scopes: string[];
+  provider?: 'wechat_official_account' | 'wechat_website' | 'wechat_mini_program';
+  loginEntrySlug?: string;
+  returnTo?: string;
   state?: string;
   codeChallenge?: string;
   codeChallengeMethod?: 'plain' | 'S256';
@@ -81,6 +84,7 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
         clientId: client.clientId,
         redirectUri,
         scopes,
+        provider: 'wechat_official_account',
         state: queryString(req, 'state'),
         codeChallenge: queryString(req, 'code_challenge'),
         codeChallengeMethod: parseCodeChallengeMethod(queryString(req, 'code_challenge_method')),
@@ -91,9 +95,57 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
     res.redirect(302, `${config.publicBaseUrl}/login/wechat/offiaccount?state=${encodeURIComponent(state)}`);
   });
 
+  router.get('/login/:slug', (req, res) => {
+    const entry = findLoginEntry(config, req.params.slug);
+    if (!entry) {
+      res.status(404).json({ error: 'not_found', error_description: 'unknown login entry' });
+      return;
+    }
+    const client = findClient(config, entry.clientId);
+    if (!client || !client.redirectUris.includes(entry.defaultRedirectUri)) {
+      res.status(500).json({ error: 'server_error', error_description: 'login entry is not valid' });
+      return;
+    }
+
+    const scopes = queryString(req, 'scope') ? parseScopes(queryString(req, 'scope')) : entry.defaultScopes;
+    if (!scopes.every((scope) => entry.defaultScopes.includes(scope) && client.scopes.includes(scope))) {
+      res.status(400).json({ error: 'invalid_scope' });
+      return;
+    }
+
+    const returnTo = validateReturnTo(queryString(req, 'return_to'), entry);
+    if (returnTo instanceof Error) {
+      res.status(400).json({ error: 'invalid_request', error_description: returnTo.message });
+      return;
+    }
+
+    const state = createSignedState(
+      {
+        clientId: client.clientId,
+        redirectUri: entry.defaultRedirectUri,
+        scopes,
+        provider: entry.provider,
+        loginEntrySlug: entry.slug,
+        returnTo,
+        state: queryString(req, 'state'),
+        codeChallenge: queryString(req, 'code_challenge'),
+        codeChallengeMethod: parseCodeChallengeMethod(queryString(req, 'code_challenge_method')),
+      },
+      config.tokenSecret,
+      config.authorizationCodeTtlSeconds
+    );
+
+    if (entry.provider === 'wechat_official_account') {
+      res.redirect(302, `${config.publicBaseUrl}/login/wechat/offiaccount?state=${encodeURIComponent(state)}`);
+      return;
+    }
+    res.status(501).json({ error: 'not_implemented', error_description: `${entry.provider} login is not implemented` });
+  });
+
   router.get('/login/wechat/offiaccount', (req, res) => {
     const state = queryString(req, 'state');
-    if (!state || !verifySignedState<OAuthAuthorizeState>(state, config.tokenSecret)) {
+    const payload = state ? verifySignedState<OAuthAuthorizeState>(state, config.tokenSecret) : undefined;
+    if (!state || !payload || (payload.provider && payload.provider !== 'wechat_official_account')) {
       res.status(400).json({ error: 'invalid_state' });
       return;
     }
@@ -138,6 +190,7 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
     const redirectUrl = new URL(state.redirectUri);
     redirectUrl.searchParams.set('code', authCode);
     if (state.state) redirectUrl.searchParams.set('state', state.state);
+    if (state.returnTo) redirectUrl.searchParams.set('return_to', state.returnTo);
     res.redirect(302, redirectUrl.toString());
   }));
 
@@ -318,6 +371,39 @@ function authenticateClient(config: AuthServiceConfig, req: Request): OAuthClien
 function findClient(config: AuthServiceConfig, clientId: string | undefined): OAuthClient | undefined {
   if (!clientId) return undefined;
   return config.oauthClients.find((client) => client.clientId === clientId);
+}
+
+function findLoginEntry(config: AuthServiceConfig, slug: string | undefined): LoginEntry | undefined {
+  if (!slug) return undefined;
+  return config.loginEntries.find((entry) => entry.slug === slug);
+}
+
+function validateReturnTo(value: string | undefined, entry: LoginEntry): string | undefined | Error {
+  if (!value) return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return new Error('return_to must be an absolute URL');
+  }
+  if (url.username || url.password) return new Error('return_to must not include credentials');
+  if (url.hash) return new Error('return_to must not include a fragment');
+  if (!isHttpsOrLocalHttp(url)) return new Error('return_to must use https or configured local http');
+
+  const normalized = url.toString();
+  const allowed = entry.allowedReturnUrlPrefixes.some((prefix) => normalized.startsWith(normalizeReturnUrlPrefix(prefix)));
+  return allowed ? normalized : new Error('return_to is not allowed for this login entry');
+}
+
+function normalizeReturnUrlPrefix(prefix: string): string {
+  const url = new URL(prefix);
+  url.hash = '';
+  return url.toString();
+}
+
+function isHttpsOrLocalHttp(url: URL): boolean {
+  if (url.protocol === 'https:') return true;
+  return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
 }
 
 function parseScopes(scope: string | undefined): string[] {

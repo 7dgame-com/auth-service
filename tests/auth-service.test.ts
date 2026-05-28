@@ -45,6 +45,36 @@ describe('unified auth service', () => {
     expect(config.wechat.officialToken).toBe('wechat-token');
   });
 
+  it('accepts configured login entries and rejects invalid login entry wiring', () => {
+    const loginEntries = [
+      {
+        slug: 'custom',
+        clientId: 'bujiaban-web',
+        defaultRedirectUri: 'https://bujiaban.com/auth/callback',
+        allowedReturnUrlPrefixes: ['https://bujiaban.com/app/'],
+        defaultScopes: ['openid'],
+        provider: 'wechat_official_account',
+        displayName: 'Custom Login',
+      },
+    ];
+    const config = createConfig({
+      AUTH_LOGIN_ENTRIES_JSON: JSON.stringify(loginEntries),
+      AUTH_TOKEN_SECRET: 'test-secret',
+    });
+
+    expect(config.loginEntries).toEqual(loginEntries);
+    expect(() => createConfig({
+      AUTH_LOGIN_ENTRIES_JSON: JSON.stringify([
+        { ...loginEntries[0], defaultRedirectUri: 'https://evil.example/callback' },
+      ]),
+      AUTH_TOKEN_SECRET: 'test-secret',
+    })).toThrow(/defaultRedirectUri/);
+    expect(() => createConfig({
+      AUTH_LOGIN_ENTRIES_JSON: JSON.stringify([loginEntries[0], { ...loginEntries[0] }]),
+      AUTH_TOKEN_SECRET: 'test-secret',
+    })).toThrow(/Duplicate login entry slug/);
+  });
+
   it('matches Yii Redis ActiveRecord keys for legacy scan tokens', () => {
     expect(yiiRedisOpenIdKey('abc123')).toBe('open_id:a:abc123');
     expect(yiiRedisOpenIdKey('token-with-dash')).toBe(
@@ -291,6 +321,74 @@ describe('unified auth service', () => {
     });
     expect(revokedResponse.status).toBe(400);
     expect(await revokedResponse.json()).toMatchObject({ error: 'invalid_grant' });
+  });
+
+  it('starts OAuth from a short login URL and preserves validated return_to', async () => {
+    const config = createConfig({
+      AUTH_PUBLIC_BASE_URL: 'http://127.0.0.1',
+      AUTH_ALLOW_MOCK_WECHAT: 'true',
+      AUTH_WECHAT_SIGNATURE_REQUIRED: 'false',
+      AUTH_WECHAT_OFFICIAL_APP_ID: 'wx-test',
+      AUTH_TOKEN_SECRET: 'test-secret',
+    });
+    const app = await startApp(config, new MemoryAuthStore());
+    const verifier = 'short-login-pkce-verifier';
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+
+    const loginUrl = new URL(`${app.baseUrl}/login/bujiaban`);
+    loginUrl.searchParams.set('return_to', 'https://bujiaban.com/dashboard');
+    loginUrl.searchParams.set('state', 'short-login-state');
+    loginUrl.searchParams.set('code_challenge', challenge);
+    loginUrl.searchParams.set('code_challenge_method', 'S256');
+
+    const loginLocation = await expectRedirect(loginUrl.toString());
+    expect(loginLocation).toContain('/login/wechat/offiaccount?state=');
+    const mockWechatCallback = await expectRedirect(loginLocation);
+    const callbackLocation = await expectRedirect(mockWechatCallback);
+    const callbackUrl = new URL(callbackLocation);
+    expect(callbackUrl.origin + callbackUrl.pathname).toBe('https://bujiaban.com/auth/callback');
+    expect(callbackUrl.searchParams.get('state')).toBe('short-login-state');
+    expect(callbackUrl.searchParams.get('return_to')).toBe('https://bujiaban.com/dashboard');
+    const code = callbackUrl.searchParams.get('code');
+    expect(code).toBeTruthy();
+
+    const tokenResponse = await fetch(`${app.baseUrl}/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: 'bujiaban-web',
+        redirect_uri: 'https://bujiaban.com/auth/callback',
+        code: code || '',
+        code_verifier: verifier,
+      }),
+    });
+    expect(tokenResponse.status).toBe(200);
+  });
+
+  it('rejects unknown login slugs and untrusted return_to URLs before redirecting', async () => {
+    const config = createConfig({
+      AUTH_PUBLIC_BASE_URL: 'http://127.0.0.1',
+      AUTH_ALLOW_MOCK_WECHAT: 'true',
+      AUTH_WECHAT_OFFICIAL_APP_ID: 'wx-test',
+      AUTH_TOKEN_SECRET: 'test-secret',
+    });
+    const app = await startApp(config, new MemoryAuthStore());
+
+    const unknownResponse = await fetch(`${app.baseUrl}/login/missing`, { redirect: 'manual' });
+    expect(unknownResponse.status).toBe(404);
+
+    for (const returnTo of [
+      'https://evil.example/dashboard',
+      'https://bujiaban.com:pass@evil.example/dashboard',
+      'https://bujiaban.com/dashboard#fragment',
+    ]) {
+      const externalReturnUrl = new URL(`${app.baseUrl}/login/bujiaban`);
+      externalReturnUrl.searchParams.set('return_to', returnTo);
+      const externalResponse = await fetch(externalReturnUrl, { redirect: 'manual' });
+      expect(externalResponse.status).toBe(400);
+      expect(await externalResponse.json()).toMatchObject({ error: 'invalid_request' });
+    }
   });
 });
 

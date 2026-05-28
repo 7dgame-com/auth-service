@@ -61,6 +61,16 @@ export interface OAuthClient {
   publicClient: boolean;
 }
 
+export interface LoginEntry {
+  slug: string;
+  clientId: string;
+  defaultRedirectUri: string;
+  allowedReturnUrlPrefixes: string[];
+  defaultScopes: string[];
+  provider: AuthIdentityProvider;
+  displayName?: string;
+}
+
 export interface OAuthAuthorizationCode {
   codeHash: string;
   clientId: string;

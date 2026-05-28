@@ -1,5 +1,5 @@
 import fs from 'fs';
-import type { OAuthClient } from './types';
+import type { AuthIdentityProvider, LoginEntry, OAuthClient } from './types';
 
 export interface WechatConfig {
   officialAppId?: string;
@@ -37,12 +37,14 @@ export interface AuthServiceConfig {
   enableLegacyDebugEndpoints: boolean;
   allowMockWechat: boolean;
   oauthClients: OAuthClient[];
+  loginEntries: LoginEntry[];
   wechat: WechatConfig;
 }
 
 export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceConfig {
   const publicBaseUrl = stripTrailingSlash(readString(env, 'AUTH_PUBLIC_BASE_URL', 'http://localhost:3010'));
   const officialToken = readFirstString(env, ['AUTH_WECHAT_OFFICIAL_TOKEN', 'WECHAT_TOKEN']);
+  const oauthClients = readOAuthClients(env, publicBaseUrl);
 
   return {
     host: readString(env, 'AUTH_SERVICE_HOST', '0.0.0.0'),
@@ -60,7 +62,8 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
     legacyLoginTokenTtlSeconds: readNumber(env, 'AUTH_LEGACY_LOGIN_TOKEN_TTL_SECONDS', 30 * 24 * 60 * 60),
     enableLegacyDebugEndpoints: readBoolean(env, 'AUTH_ENABLE_LEGACY_DEBUG_ENDPOINTS', false),
     allowMockWechat: readBoolean(env, 'AUTH_ALLOW_MOCK_WECHAT', false),
-    oauthClients: readOAuthClients(env, publicBaseUrl),
+    oauthClients,
+    loginEntries: readLoginEntries(env, oauthClients),
     wechat: {
       officialAppId: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_ID', 'WECHAT_APP_ID']),
       officialAppSecret: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_SECRET', 'WECHAT_SECRET']),
@@ -104,6 +107,119 @@ function normalizeClient(client: OAuthClient): OAuthClient {
     scopes: client.scopes?.length ? client.scopes : ['openid', 'profile'],
     publicClient: client.publicClient ?? !client.clientSecret,
   };
+}
+
+function readLoginEntries(env: NodeJS.ProcessEnv, oauthClients: OAuthClient[]): LoginEntry[] {
+  const configured = readOptionalString(env, 'AUTH_LOGIN_ENTRIES_JSON');
+  const entries = configured
+    ? (JSON.parse(configured) as LoginEntry[]).map(normalizeLoginEntry)
+    : defaultLoginEntries(oauthClients);
+  validateLoginEntries(entries, oauthClients);
+  return entries;
+}
+
+function defaultLoginEntries(oauthClients: OAuthClient[]): LoginEntry[] {
+  const defaults: LoginEntry[] = [];
+  const bujiaban = oauthClients.find((client) => client.clientId === 'bujiaban-web');
+  if (bujiaban?.redirectUris.includes('https://bujiaban.com/auth/callback')) {
+    defaults.push({
+      slug: 'bujiaban',
+      clientId: 'bujiaban-web',
+      defaultRedirectUri: 'https://bujiaban.com/auth/callback',
+      allowedReturnUrlPrefixes: ['https://bujiaban.com/', 'https://www.bujiaban.com/'],
+      defaultScopes: ['openid', 'profile'],
+      provider: 'wechat_official_account',
+      displayName: '不加班',
+    });
+  }
+
+  const threeDugc = oauthClients.find((client) => client.clientId === '3dugc-web');
+  if (threeDugc?.redirectUris.includes('https://3dugc.com/auth/callback')) {
+    defaults.push({
+      slug: '3dugc',
+      clientId: '3dugc-web',
+      defaultRedirectUri: 'https://3dugc.com/auth/callback',
+      allowedReturnUrlPrefixes: ['https://3dugc.com/'],
+      defaultScopes: ['openid', 'profile'],
+      provider: 'wechat_official_account',
+      displayName: '3DUGC',
+    });
+  }
+  return defaults;
+}
+
+function normalizeLoginEntry(entry: LoginEntry): LoginEntry {
+  return {
+    slug: String(entry.slug || '').trim(),
+    clientId: String(entry.clientId || '').trim(),
+    defaultRedirectUri: String(entry.defaultRedirectUri || '').trim(),
+    allowedReturnUrlPrefixes: normalizeStringArray(entry.allowedReturnUrlPrefixes),
+    defaultScopes: normalizeStringArray(entry.defaultScopes),
+    provider: String(entry.provider || '').trim() as AuthIdentityProvider,
+    displayName: readOptionalObjectString(entry, 'displayName'),
+  };
+}
+
+function validateLoginEntries(entries: LoginEntry[], oauthClients: OAuthClient[]): void {
+  const seenSlugs = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.slug || !/^[a-z0-9][a-z0-9-]*$/i.test(entry.slug)) {
+      throw new Error(`Invalid login entry slug: ${entry.slug || '<empty>'}`);
+    }
+    if (seenSlugs.has(entry.slug)) throw new Error(`Duplicate login entry slug: ${entry.slug}`);
+    seenSlugs.add(entry.slug);
+
+    const client = oauthClients.find((candidate) => candidate.clientId === entry.clientId);
+    if (!client) throw new Error(`Login entry ${entry.slug} references unknown OAuth client: ${entry.clientId}`);
+    if (!client.redirectUris.includes(entry.defaultRedirectUri)) {
+      throw new Error(`Login entry ${entry.slug} defaultRedirectUri is not allowed for client ${entry.clientId}`);
+    }
+    if (!entry.defaultScopes.length) throw new Error(`Login entry ${entry.slug} must define defaultScopes`);
+    if (!entry.defaultScopes.every((scope) => client.scopes.includes(scope))) {
+      throw new Error(`Login entry ${entry.slug} defaultScopes must be allowed by client ${entry.clientId}`);
+    }
+    if (!entry.allowedReturnUrlPrefixes.length) {
+      throw new Error(`Login entry ${entry.slug} must define allowedReturnUrlPrefixes`);
+    }
+    for (const prefix of entry.allowedReturnUrlPrefixes) validateReturnUrlPrefix(entry.slug, prefix);
+    if (!isSupportedProvider(entry.provider)) {
+      throw new Error(`Login entry ${entry.slug} has unsupported provider: ${entry.provider}`);
+    }
+  }
+}
+
+function validateReturnUrlPrefix(slug: string, prefix: string): void {
+  let url: URL;
+  try {
+    url = new URL(prefix);
+  } catch {
+    throw new Error(`Login entry ${slug} has invalid return URL prefix: ${prefix}`);
+  }
+  if (url.username || url.password) {
+    throw new Error(`Login entry ${slug} return URL prefix must not include credentials`);
+  }
+  if (url.hash) throw new Error(`Login entry ${slug} return URL prefix must not include a fragment`);
+  if (!isHttpsOrLocalHttp(url)) {
+    throw new Error(`Login entry ${slug} return URL prefix must use https or local http`);
+  }
+}
+
+function isSupportedProvider(provider: string): provider is AuthIdentityProvider {
+  return provider === 'wechat_official_account' || provider === 'wechat_website' || provider === 'wechat_mini_program';
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
+}
+
+function readOptionalObjectString(source: object, key: string): string | undefined {
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function isHttpsOrLocalHttp(url: URL): boolean {
+  if (url.protocol === 'https:') return true;
+  return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
 }
 
 function readTokenSecret(env: NodeJS.ProcessEnv): string {
