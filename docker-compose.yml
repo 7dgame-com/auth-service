@@ -1,0 +1,15 @@
+services:
+  auth:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3010:3010"
+    environment:
+      - NODE_ENV=production
+      - AUTH_SERVICE_PORT=3010
+      - AUTH_PUBLIC_BASE_URL=http://localhost:3010
+      - AUTH_DATABASE_AUTO_MIGRATE=false
+      - AUTH_ALLOW_MOCK_WECHAT=true
+      - AUTH_TOKEN_SECRET=local-dev-secret
+    restart: unless-stopped

@@ -1,0 +1,51 @@
+services:
+  auth:
+    image: hkccr.ccs.tencentyun.com/services/auth-service:latest
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.b1_bujiaban_com-secure.entrypoints=websecure"
+      - "traefik.http.routers.b1_bujiaban_com-secure.rule=Host(`auth.bujiaban.com`)"
+      - "traefik.http.routers.b1_bujiaban_com-secure.middlewares=test-compress@file"
+      - "traefik.http.services.b1_bujiaban_com.loadbalancer.server.port=3010"
+    environment:
+      - NODE_ENV=production
+      - AUTH_SERVICE_PORT=3010
+      - AUTH_PUBLIC_BASE_URL=https://auth.bujiaban.com
+      - AUTH_DATABASE_AUTO_MIGRATE=true
+      - AUTH_ALLOW_MOCK_WECHAT=false
+      - AUTH_CORS_ORIGINS=https://auth.bujiaban.com,https://bujiaban.com,https://3dugc.com
+
+      # New-style config. Prefer these for new services.
+      - AUTH_DATABASE_URL=
+      - AUTH_TOKEN_SECRET=
+      - AUTH_WECHAT_OFFICIAL_APP_ID=
+      - AUTH_WECHAT_OFFICIAL_APP_SECRET=
+      - AUTH_WECHAT_OFFICIAL_TOKEN=
+      - AUTH_WECHAT_OFFICIAL_AES_KEY=
+
+      # Legacy gdgeek/auth-compatible config. These may stay during cutover.
+      - MYSQL_HOST=
+      - MYSQL_PORT=3306
+      - MYSQL_DB=
+      - MYSQL_USERNAME=
+      - MYSQL_PASSWORD=
+      - JWT_KEY=/var/www/.ssh/ecc-private-key.pem
+      - WECHAT_APP_ID=
+      - WECHAT_SECRET=
+      - WECHAT_TOKEN=
+      - WECHAT_AES_KEY=
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+    security_opt:
+      - seccomp:unconfined
+    restart: always
+    volumes:
+      - /home/ubuntu/src/ssh/:/var/www/.ssh/
+
+networks:
+  proxy:
+    external: true
