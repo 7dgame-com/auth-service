@@ -216,7 +216,15 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
       res.status(400).json({ error: 'invalid_client' });
       return;
     }
-    res.json({ status: 'confirmed', redirectUrl });
+    res.json({
+      status: 'confirmed',
+      redirectUrl,
+      user: {
+        displayName: profile.nickname,
+        avatarUrl: profile.avatarUrl,
+        accountHint: buildWechatAccountHint(profile),
+      },
+    });
   }));
 
   router.get('/login/wechat/website', (req, res) => {
@@ -596,6 +604,11 @@ function userInfoFromUser(user: AuthUser): Record<string, string | undefined> {
     name: user.displayName,
     picture: user.avatarUrl,
   };
+}
+
+function buildWechatAccountHint(profile: WechatProfile): string {
+  const stableId = profile.unionId || `${profile.provider}:${profile.providerAppId}:${profile.openId}`;
+  return `微信账号 ${sha256Base64Url(stableId).slice(0, 8)}`;
 }
 
 function queryString(req: Request, key: string): string | undefined {

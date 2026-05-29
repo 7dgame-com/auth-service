@@ -485,8 +485,14 @@ describe('unified auth service', () => {
 
     const confirmedResponse = await fetch(pendingUrl);
     expect(confirmedResponse.status).toBe(200);
-    const confirmed = await confirmedResponse.json() as { status: string; redirectUrl: string };
+    const confirmed = await confirmedResponse.json() as {
+      status: string;
+      redirectUrl: string;
+      user: { displayName?: string; accountHint?: string };
+    };
     expect(confirmed.status).toBe('confirmed');
+    expect(confirmed.user.displayName).toBe('Mock WeChat User');
+    expect(confirmed.user.accountHint).toMatch(/^微信账号 [A-Za-z0-9_-]{8}$/);
     const callbackUrl = new URL(confirmed.redirectUrl);
     expect(callbackUrl.origin + callbackUrl.pathname).toBe('https://3dugc.com/auth/callback');
     expect(callbackUrl.searchParams.get('state')).toBe('official-qr-state');
