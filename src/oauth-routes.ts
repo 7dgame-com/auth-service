@@ -12,7 +12,7 @@ import {
 } from './crypto';
 import type { AuthStore } from './store';
 import { addSeconds } from './store';
-import type { AuthIdentityProvider, AuthUser, LoginEntry, OAuthAuthorizationCode, OAuthClient, WechatProfile } from './types';
+import type { AuthIdentity, AuthIdentityProvider, AuthUser, LoginEntry, OAuthAuthorizationCode, OAuthClient, WechatProfile } from './types';
 import type { WechatClient } from './wechat-client';
 
 interface OAuthAuthorizeState extends Record<string, unknown> {
@@ -216,15 +216,7 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
       res.status(400).json({ error: 'invalid_client' });
       return;
     }
-    res.json({
-      status: 'confirmed',
-      redirectUrl,
-      user: {
-        displayName: profile.nickname,
-        avatarUrl: profile.avatarUrl,
-        accountHint: buildWechatAccountHint(profile),
-      },
-    });
+    res.json({ status: 'confirmed', redirectUrl });
   }));
 
   router.get('/login/wechat/website', (req, res) => {
@@ -301,7 +293,8 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
       res.status(401).json({ error: 'invalid_token' });
       return;
     }
-    res.json(userInfoFromUser(user));
+    const identity = await store.findPrimaryWechatIdentity(user.id);
+    res.json(userInfoFromUser(user, identity));
   }));
 
   return router;
@@ -597,18 +590,23 @@ function readAccessToken(config: AuthServiceConfig, req: Request) {
   return payload?.typ === 'access' ? payload : undefined;
 }
 
-function userInfoFromUser(user: AuthUser): Record<string, string | undefined> {
+function userInfoFromUser(user: AuthUser, identity?: AuthIdentity): Record<string, string | undefined> {
   return {
     sub: user.id,
     unionid: user.primaryUnionId,
     name: user.displayName,
     picture: user.avatarUrl,
+    wechat_provider: identity?.provider,
+    wechat_openid_tail: identity?.openId ? identity.openId.slice(-8) : undefined,
+    wechat_unionid_tail: identity?.unionId ? identity.unionId.slice(-8) : undefined,
+    account_hint: buildWechatAccountHint(identity),
   };
 }
 
-function buildWechatAccountHint(profile: WechatProfile): string {
-  const stableId = profile.unionId || `${profile.provider}:${profile.providerAppId}:${profile.openId}`;
-  return `微信账号 ${sha256Base64Url(stableId).slice(0, 8)}`;
+function buildWechatAccountHint(identity: AuthIdentity | undefined): string | undefined {
+  if (!identity) return undefined;
+  if (identity.unionId) return `微信 UnionID 后8位 ${identity.unionId.slice(-8)}`;
+  return `微信 OpenID 后8位 ${identity.openId.slice(-8)}`;
 }
 
 function queryString(req: Request, key: string): string | undefined {

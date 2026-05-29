@@ -389,6 +389,20 @@ export class MySqlAuthStore implements AuthStore {
     return findUserById(this.pool, userId);
   }
 
+  async findPrimaryWechatIdentity(userId: string): Promise<AuthIdentity | undefined> {
+    await this.ensureSchema();
+    const [rows] = await this.pool.execute<IdentityRow[]>(
+      `
+        SELECT * FROM auth_identities
+        WHERE user_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `,
+      [userId]
+    );
+    return rows[0] ? identityFromRow(rows[0]) : undefined;
+  }
+
   private async ensureSchema(): Promise<void> {
     if (this.autoMigrate) await this.migrate();
   }

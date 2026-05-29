@@ -139,6 +139,10 @@ export class MemoryAuthStore implements AuthStore {
     return this.users.get(userId);
   }
 
+  async findPrimaryWechatIdentity(userId: string): Promise<AuthIdentity | undefined> {
+    return Array.from(this.identities.values()).find((identity) => identity.userId === userId);
+  }
+
   private findUserByUnionId(unionId: string | undefined): AuthUser | undefined {
     if (!unionId) return undefined;
     return Array.from(this.users.values()).find((user) => user.primaryUnionId === unionId);

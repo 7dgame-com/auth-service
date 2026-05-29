@@ -485,14 +485,8 @@ describe('unified auth service', () => {
 
     const confirmedResponse = await fetch(pendingUrl);
     expect(confirmedResponse.status).toBe(200);
-    const confirmed = await confirmedResponse.json() as {
-      status: string;
-      redirectUrl: string;
-      user: { displayName?: string; accountHint?: string };
-    };
+    const confirmed = await confirmedResponse.json() as { status: string; redirectUrl: string };
     expect(confirmed.status).toBe('confirmed');
-    expect(confirmed.user.displayName).toBe('Mock WeChat User');
-    expect(confirmed.user.accountHint).toMatch(/^微信账号 [A-Za-z0-9_-]{8}$/);
     const callbackUrl = new URL(confirmed.redirectUrl);
     expect(callbackUrl.origin + callbackUrl.pathname).toBe('https://3dugc.com/auth/callback');
     expect(callbackUrl.searchParams.get('state')).toBe('official-qr-state');
@@ -511,6 +505,15 @@ describe('unified auth service', () => {
       }),
     });
     expect(tokenResponse.status).toBe(200);
+    const tokenSet = await tokenResponse.json() as { access_token: string };
+    const userInfoResponse = await fetch(`${app.baseUrl}/userinfo`, {
+      headers: { authorization: `Bearer ${tokenSet.access_token}` },
+    });
+    expect(await userInfoResponse.json()).toMatchObject({
+      account_hint: '微信 UnionID 后8位 icial-qr',
+      wechat_openid_tail: 'icial-qr',
+      wechat_unionid_tail: 'icial-qr',
+    });
   });
 
   it('completes OAuth through a mocked WeChat website callback', async () => {

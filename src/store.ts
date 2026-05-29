@@ -1,4 +1,5 @@
 import type {
+  AuthIdentity,
   AuthUser,
   LegacyLoginToken,
   LegacyScanToken,
@@ -22,6 +23,7 @@ export interface AuthStore {
   findRefreshToken(tokenHash: string): Promise<OAuthRefreshToken | undefined>;
   revokeRefreshToken(tokenHash: string): Promise<void>;
   findUserById(userId: string): Promise<AuthUser | undefined>;
+  findPrimaryWechatIdentity(userId: string): Promise<AuthIdentity | undefined>;
 }
 
 export function addSeconds(date: Date, seconds: number): string {
