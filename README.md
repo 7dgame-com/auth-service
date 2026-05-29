@@ -135,7 +135,11 @@ AUTH_WECHAT_OFFICIAL_APP_ID=wx...
 AUTH_WECHAT_OFFICIAL_APP_SECRET=...
 AUTH_WECHAT_OFFICIAL_TOKEN=...
 AUTH_WECHAT_OFFICIAL_AES_KEY=
+AUTH_WECHAT_WEBSITE_APP_ID=wx...
+AUTH_WECHAT_WEBSITE_APP_SECRET=...
 ```
+
+`wechat_official_account` 使用公众号网页授权，适合微信客户端内打开；`wechat_website` 使用微信开放平台网站应用的 `/connect/qrconnect`，适合 PC 浏览器扫码登录。`/login/3dugc` 的内置默认 provider 是 `wechat_website`，生产环境需要配置微信开放平台网站应用的 AppID 和 Secret。公众号 AppID/Secret 不能直接替代网站应用凭据。
 
 ## 多 URL 登录入口
 
@@ -157,6 +161,8 @@ https://auth.bujiaban.com/login/bujiaban?return_to=https%3A%2F%2Fbujiaban.com%2F
 https://bujiaban.com/auth/callback?code=...&state=client-state&return_to=https%3A%2F%2Fbujiaban.com%2Fdashboard
 ```
 
+PC 端需要站内弹窗扫码时，可以请求 `/login/:slug/widget-config` 获取微信官方 `WxLogin` 所需的公开参数。该接口同样会校验 `return_to`、scope 和 PKCE，然后返回签名后的 provider state，不返回任何 Secret。
+
 `redirect_uri` 仍然必须精确匹配 OAuth client 白名单；`return_to` 只允许匹配 `allowedReturnUrlPrefixes`，不能传任意外部 URL。
 
 兼容旧变量：
@@ -172,6 +178,8 @@ WECHAT_APP_ID
 WECHAT_SECRET
 WECHAT_TOKEN
 WECHAT_AES_KEY
+WECHAT_WEBSITE_APP_ID
+WECHAT_WEBSITE_APP_SECRET
 REDIS_HOST
 REDIS_PORT
 REDIS_DB

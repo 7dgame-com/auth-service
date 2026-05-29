@@ -13,6 +13,7 @@ Auth Service: https://auth.bujiaban.com
 OAuth client_id: 3dugc-web
 OAuth redirect_uri: https://3dugc.com/auth/callback
 默认 scope: openid profile
+登录方式: 微信开放平台网站应用扫码登录（provider: wechat_website）
 ```
 
 `auth-service` 当前内置了 `3dugc-web` 和 `/login/3dugc` 默认配置。如果生产环境显式配置了 `AUTH_OAUTH_CLIENTS_JSON` 或 `AUTH_LOGIN_ENTRIES_JSON`，请确保包含本文档第 2 节中的配置。
@@ -40,11 +41,20 @@ AUTH_LOGIN_ENTRIES_JSON='[
     "defaultRedirectUri": "https://3dugc.com/auth/callback",
     "allowedReturnUrlPrefixes": ["https://3dugc.com/"],
     "defaultScopes": ["openid", "profile"],
-    "provider": "wechat_official_account",
+    "provider": "wechat_website",
     "displayName": "3DUGC"
   }
 ]'
 ```
+
+`wechat_website` 需要微信开放平台网站应用凭据：
+
+```text
+AUTH_WECHAT_WEBSITE_APP_ID=<wechat-open-platform-website-appid>
+AUTH_WECHAT_WEBSITE_APP_SECRET=<wechat-open-platform-website-secret>
+```
+
+公众号网页授权使用 `wechat_official_account`，只能在微信客户端内正常打开；PC 浏览器扫码登录应使用 `wechat_website`。
 
 如果同一个 auth-service 还服务 `bujiaban`，不要只配置 `3dugc` 而漏掉其他 client/entry；显式 JSON 会覆盖内置默认值。
 
@@ -82,7 +92,7 @@ function randomToken(): string {
 
 ### 3.2 跳转到统一登录
 
-推荐登录 URL：
+整页跳转登录 URL：
 
 ```text
 https://auth.bujiaban.com/login/3dugc?return_to=<业务最终页面>&state=<state>&code_challenge=<challenge>&code_challenge_method=S256
@@ -99,6 +109,28 @@ https://auth.bujiaban.com/login/3dugc?return_to=https%3A%2F%2F3dugc.com%2Fdashbo
 - `return_to`：登录完成后业务站最终要去的页面，必须是 `https://3dugc.com/` 下的 URL。
 - `state`：业务站生成并校验的随机字符串。
 - `code_challenge` / `code_challenge_method`：PKCE 参数。
+
+PC 端也可以用模态窗渲染微信官方扫码组件。业务站先请求：
+
+```http
+GET https://auth.bujiaban.com/login/3dugc/widget-config?return_to=<业务最终页面>&state=<state>&code_challenge=<challenge>&code_challenge_method=S256
+```
+
+返回公开参数：
+
+```json
+{
+  "provider": "wechat_website",
+  "mode": "widget",
+  "appId": "wx...",
+  "redirectUri": "https://auth.bujiaban.com/login/wechat/website/callback",
+  "scope": "snsapi_login",
+  "state": "<signed-state>",
+  "selfRedirect": false
+}
+```
+
+前端用微信官方 `WxLogin` 将二维码渲染到模态窗，授权完成后仍回到第 4 节的业务 callback。
 
 ## 4. Callback 处理
 
@@ -234,7 +266,7 @@ AUTH_LOGIN_ENTRIES_JSON='[
     "defaultRedirectUri": "http://localhost:3000/auth/callback",
     "allowedReturnUrlPrefixes": ["http://localhost:3000/"],
     "defaultScopes": ["openid", "profile"],
-    "provider": "wechat_official_account",
+    "provider": "wechat_website",
     "displayName": "3DUGC Local"
   }
 ]'
@@ -258,7 +290,8 @@ http://localhost:3010/login/3dugc-local?return_to=http%3A%2F%2Flocalhost%3A3000%
 ## 10. 快速检查清单
 
 - [ ] auth-service 已部署 `latest` 或包含多 URL 登录的版本。
-- [ ] `https://auth.bujiaban.com/login/3dugc` 可访问并能跳转微信授权。
+- [ ] 已配置微信开放平台网站应用 `AUTH_WECHAT_WEBSITE_APP_ID` / `AUTH_WECHAT_WEBSITE_APP_SECRET`。
+- [ ] `https://auth.bujiaban.com/login/3dugc` 可访问并能跳转微信扫码授权。
 - [ ] `https://3dugc.com/auth/callback` 已实现。
 - [ ] callback 能用 `code + code_verifier` 换 token。
 - [ ] `/userinfo` 能返回 `sub`。

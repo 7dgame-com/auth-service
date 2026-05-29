@@ -81,7 +81,7 @@ Plan: ../plans/2026-05-28-multi-url-login-plan.md
 - [ ] Add admin or seed workflow for login entries.
 - [ ] Add per-entry branding on a future login page.
 - [ ] Add multi-WeChat-app provider configuration.
-- [ ] Implement `/login/wechat/website`.
+- [x] Implement `/login/wechat/website`.
 - [ ] Implement `/login/wechat/miniprogram`.
 
 ## Definition of Done

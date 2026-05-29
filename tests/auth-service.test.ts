@@ -31,6 +31,8 @@ describe('unified auth service', () => {
       WECHAT_APP_ID: 'wx-legacy',
       WECHAT_SECRET: 'wechat-secret',
       WECHAT_TOKEN: 'wechat-token',
+      AUTH_WECHAT_WEBSITE_APP_ID: 'wx-website',
+      AUTH_WECHAT_WEBSITE_APP_SECRET: 'website-secret',
       REDIS_HOST: '10.0.0.6',
       REDIS_PORT: '6380',
       REDIS_DB: '2',
@@ -42,7 +44,19 @@ describe('unified auth service', () => {
     expect(config.tokenSecret).toBe('legacy-jwt-secret');
     expect(config.wechat.officialAppId).toBe('wx-legacy');
     expect(config.wechat.officialAppSecret).toBe('wechat-secret');
+    expect(config.wechat.websiteAppId).toBe('wx-website');
+    expect(config.wechat.websiteAppSecret).toBe('website-secret');
     expect(config.wechat.officialToken).toBe('wechat-token');
+  });
+
+  it('uses WeChat website QR login for the built-in 3dugc entry', () => {
+    const config = createConfig({ AUTH_TOKEN_SECRET: 'test-secret' });
+
+    expect(config.loginEntries.find((entry) => entry.slug === '3dugc')).toMatchObject({
+      clientId: '3dugc-web',
+      provider: 'wechat_website',
+      defaultRedirectUri: 'https://3dugc.com/auth/callback',
+    });
   });
 
   it('accepts configured login entries and rejects invalid login entry wiring', () => {
@@ -364,6 +378,118 @@ describe('unified auth service', () => {
       }),
     });
     expect(tokenResponse.status).toBe(200);
+  });
+
+  it('routes a WeChat website login entry to qrconnect', async () => {
+    const config = createConfig({
+      AUTH_PUBLIC_BASE_URL: 'http://127.0.0.1',
+      AUTH_WECHAT_WEBSITE_APP_ID: 'wx-website',
+      AUTH_WECHAT_WEBSITE_APP_SECRET: 'website-secret',
+      AUTH_TOKEN_SECRET: 'test-secret',
+      AUTH_LOGIN_ENTRIES_JSON: JSON.stringify([
+        {
+          slug: '3dugc',
+          clientId: '3dugc-web',
+          defaultRedirectUri: 'https://3dugc.com/auth/callback',
+          allowedReturnUrlPrefixes: ['https://3dugc.com/'],
+          defaultScopes: ['openid', 'profile'],
+          provider: 'wechat_website',
+          displayName: '3DUGC',
+        },
+      ]),
+    });
+    const app = await startApp(config, new MemoryAuthStore());
+
+    const widgetUrl = new URL(`${app.baseUrl}/login/3dugc/widget-config`);
+    widgetUrl.searchParams.set('state', 'widget-state');
+    const widgetResponse = await fetch(widgetUrl);
+    expect(widgetResponse.status).toBe(200);
+    const widget = await widgetResponse.json() as {
+      provider: string;
+      mode: string;
+      appId: string;
+      redirectUri: string;
+      scope: string;
+      state: string;
+      selfRedirect: boolean;
+    };
+    expect(widget).toMatchObject({
+      provider: 'wechat_website',
+      mode: 'widget',
+      appId: 'wx-website',
+      redirectUri: `${app.baseUrl}/login/wechat/website/callback`,
+      scope: 'snsapi_login',
+      selfRedirect: false,
+    });
+    expect(widget.state).toBeTruthy();
+
+    const loginLocation = await expectRedirect(`${app.baseUrl}/login/3dugc`);
+    expect(loginLocation).toContain('/login/wechat/website?state=');
+    const qrConnectLocation = await expectRedirect(loginLocation);
+    const qrConnectUrl = new URL(qrConnectLocation.replace('#wechat_redirect', ''));
+    expect(qrConnectUrl.origin + qrConnectUrl.pathname).toBe('https://open.weixin.qq.com/connect/qrconnect');
+    expect(qrConnectUrl.searchParams.get('appid')).toBe('wx-website');
+    expect(qrConnectUrl.searchParams.get('redirect_uri')).toBe(`${app.baseUrl}/login/wechat/website/callback`);
+    expect(qrConnectUrl.searchParams.get('scope')).toBe('snsapi_login');
+  });
+
+  it('completes OAuth through a mocked WeChat website callback', async () => {
+    const config = createConfig({
+      AUTH_PUBLIC_BASE_URL: 'http://127.0.0.1',
+      AUTH_ALLOW_MOCK_WECHAT: 'true',
+      AUTH_WECHAT_WEBSITE_APP_ID: 'wx-website',
+      AUTH_WECHAT_WEBSITE_APP_SECRET: 'website-secret',
+      AUTH_TOKEN_SECRET: 'test-secret',
+      AUTH_LOGIN_ENTRIES_JSON: JSON.stringify([
+        {
+          slug: '3dugc',
+          clientId: '3dugc-web',
+          defaultRedirectUri: 'https://3dugc.com/auth/callback',
+          allowedReturnUrlPrefixes: ['https://3dugc.com/'],
+          defaultScopes: ['openid', 'profile'],
+          provider: 'wechat_website',
+          displayName: '3DUGC',
+        },
+      ]),
+    });
+    const app = await startApp(config, new MemoryAuthStore());
+    const redirectUri = 'https://3dugc.com/auth/callback';
+    const verifier = 'website-login-pkce-verifier';
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+    const loginUrl = new URL(`${app.baseUrl}/login/3dugc`);
+    loginUrl.searchParams.set('return_to', 'https://3dugc.com/dashboard');
+    loginUrl.searchParams.set('state', 'website-login-state');
+    loginUrl.searchParams.set('code_challenge', challenge);
+    loginUrl.searchParams.set('code_challenge_method', 'S256');
+
+    const loginLocation = await expectRedirect(loginUrl.toString());
+    expect(loginLocation).toContain('/login/wechat/website?state=');
+    const mockWechatCallback = await expectRedirect(loginLocation);
+    const callbackLocation = await expectRedirect(mockWechatCallback);
+    const callbackUrl = new URL(callbackLocation);
+    expect(callbackUrl.origin + callbackUrl.pathname).toBe(redirectUri);
+    expect(callbackUrl.searchParams.get('state')).toBe('website-login-state');
+    expect(callbackUrl.searchParams.get('return_to')).toBe('https://3dugc.com/dashboard');
+    const code = callbackUrl.searchParams.get('code');
+    expect(code).toBeTruthy();
+
+    const tokenResponse = await fetch(`${app.baseUrl}/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: '3dugc-web',
+        redirect_uri: redirectUri,
+        code: code || '',
+        code_verifier: verifier,
+      }),
+    });
+    expect(tokenResponse.status).toBe(200);
+    const tokenSet = await tokenResponse.json() as { access_token: string };
+    const userInfoResponse = await fetch(`${app.baseUrl}/userinfo`, {
+      headers: { authorization: `Bearer ${tokenSet.access_token}` },
+    });
+    expect(await userInfoResponse.json()).toMatchObject({ unionid: expect.stringContaining('mock-website-union-') });
   });
 
   it('rejects unknown login slugs and untrusted return_to URLs before redirecting', async () => {

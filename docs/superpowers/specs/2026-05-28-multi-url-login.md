@@ -136,6 +136,7 @@ scope=openid profile
 
 ```text
 GET /login/wechat/offiaccount?state=<signed-state>
+GET /login/wechat/website?state=<signed-state>
 ```
 
 ### OAuth callback 回跳

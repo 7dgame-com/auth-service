@@ -49,6 +49,8 @@ export function createApp(config: AuthServiceConfig, store: AuthStore, wechat: W
       redis: config.redis ? 'configured' : 'disabled',
       wechatOfficialAppIdConfigured: Boolean(config.wechat.officialAppId),
       wechatOfficialSecretConfigured: Boolean(config.wechat.officialAppSecret),
+      wechatWebsiteAppIdConfigured: Boolean(config.wechat.websiteAppId),
+      wechatWebsiteSecretConfigured: Boolean(config.wechat.websiteAppSecret),
     });
   });
 

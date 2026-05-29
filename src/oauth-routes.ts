@@ -12,7 +12,7 @@ import {
 } from './crypto';
 import type { AuthStore } from './store';
 import { addSeconds } from './store';
-import type { AuthUser, LoginEntry, OAuthAuthorizationCode, OAuthClient } from './types';
+import type { AuthIdentityProvider, AuthUser, LoginEntry, OAuthAuthorizationCode, OAuthClient, WechatProfile } from './types';
 import type { WechatClient } from './wechat-client';
 
 interface OAuthAuthorizeState extends Record<string, unknown> {
@@ -79,12 +79,13 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
       return;
     }
 
+    const provider = parseProvider(queryString(req, 'provider')) || 'wechat_official_account';
     const state = createSignedState(
       {
         clientId: client.clientId,
         redirectUri,
         scopes,
-        provider: 'wechat_official_account',
+        provider,
         state: queryString(req, 'state'),
         codeChallenge: queryString(req, 'code_challenge'),
         codeChallengeMethod: parseCodeChallengeMethod(queryString(req, 'code_challenge_method')),
@@ -92,7 +93,50 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
       config.tokenSecret,
       config.authorizationCodeTtlSeconds
     );
-    res.redirect(302, `${config.publicBaseUrl}/login/wechat/offiaccount?state=${encodeURIComponent(state)}`);
+    redirectToProviderLogin(config, res, provider, state);
+  });
+
+  router.get('/login/:slug/widget-config', (req, res) => {
+    const entry = findLoginEntry(config, req.params.slug);
+    if (!entry) {
+      res.status(404).json({ error: 'not_found', error_description: 'unknown login entry' });
+      return;
+    }
+    if (entry.provider !== 'wechat_website') {
+      res.status(400).json({
+        error: 'unsupported_provider',
+        error_description: `${entry.provider} cannot be embedded as a website QR login widget`,
+      });
+      return;
+    }
+
+    const prepared = prepareLoginEntryState(config, req, entry);
+    if ('error' in prepared) {
+      res.status(prepared.status).json({ error: prepared.error, error_description: prepared.errorDescription });
+      return;
+    }
+    if (config.allowMockWechat) {
+      res.json({
+        provider: 'wechat_website',
+        mode: 'mock',
+        callbackUrl: `${config.publicBaseUrl}/login/wechat/website/callback?code=mock-code&state=${encodeURIComponent(prepared.state)}`,
+      });
+      return;
+    }
+
+    try {
+      res.json({
+        provider: 'wechat_website',
+        mode: 'widget',
+        ...wechat.buildWebsiteOAuthWidgetConfig(prepared.state),
+        selfRedirect: false,
+      });
+    } catch (error) {
+      res.status(503).json({
+        error: 'wechat_website_not_configured',
+        error_description: error instanceof Error ? error.message : 'WeChat website login is not configured.',
+      });
+    }
   });
 
   router.get('/login/:slug', (req, res) => {
@@ -101,45 +145,13 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
       res.status(404).json({ error: 'not_found', error_description: 'unknown login entry' });
       return;
     }
-    const client = findClient(config, entry.clientId);
-    if (!client || !client.redirectUris.includes(entry.defaultRedirectUri)) {
-      res.status(500).json({ error: 'server_error', error_description: 'login entry is not valid' });
+    const prepared = prepareLoginEntryState(config, req, entry);
+    if ('error' in prepared) {
+      res.status(prepared.status).json({ error: prepared.error, error_description: prepared.errorDescription });
       return;
     }
 
-    const scopes = queryString(req, 'scope') ? parseScopes(queryString(req, 'scope')) : entry.defaultScopes;
-    if (!scopes.every((scope) => entry.defaultScopes.includes(scope) && client.scopes.includes(scope))) {
-      res.status(400).json({ error: 'invalid_scope' });
-      return;
-    }
-
-    const returnTo = validateReturnTo(queryString(req, 'return_to'), entry);
-    if (returnTo instanceof Error) {
-      res.status(400).json({ error: 'invalid_request', error_description: returnTo.message });
-      return;
-    }
-
-    const state = createSignedState(
-      {
-        clientId: client.clientId,
-        redirectUri: entry.defaultRedirectUri,
-        scopes,
-        provider: entry.provider,
-        loginEntrySlug: entry.slug,
-        returnTo,
-        state: queryString(req, 'state'),
-        codeChallenge: queryString(req, 'code_challenge'),
-        codeChallengeMethod: parseCodeChallengeMethod(queryString(req, 'code_challenge_method')),
-      },
-      config.tokenSecret,
-      config.authorizationCodeTtlSeconds
-    );
-
-    if (entry.provider === 'wechat_official_account') {
-      res.redirect(302, `${config.publicBaseUrl}/login/wechat/offiaccount?state=${encodeURIComponent(state)}`);
-      return;
-    }
-    res.status(501).json({ error: 'not_implemented', error_description: `${entry.provider} login is not implemented` });
+    redirectToProviderLogin(config, res, entry.provider, prepared.state);
   });
 
   router.get('/login/wechat/offiaccount', (req, res) => {
@@ -157,49 +169,33 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
   });
 
   router.get('/login/wechat/offiaccount/callback', asyncHandler(async (req, res) => {
-    const code = queryString(req, 'code');
-    const signedState = queryString(req, 'state');
-    const state = signedState ? verifySignedState<OAuthAuthorizeState>(signedState, config.tokenSecret) : undefined;
-    if (!code || !state) {
-      res.status(400).json({ error: 'invalid_callback' });
-      return;
-    }
-
-    const client = findClient(config, state.clientId);
-    if (!client || !client.redirectUris.includes(state.redirectUri)) {
-      res.status(400).json({ error: 'invalid_client' });
-      return;
-    }
-
-    const profile = await wechat.exchangeOfficialOAuthCode(code);
-    const result = await store.upsertWechatIdentity(profile);
-    const authCode = randomToken(32);
-    const now = new Date();
-    await store.createAuthorizationCode({
-      codeHash: sha256Base64Url(authCode),
-      clientId: client.clientId,
-      userId: result.user.id,
-      redirectUri: state.redirectUri,
-      codeChallenge: state.codeChallenge,
-      codeChallengeMethod: state.codeChallengeMethod,
-      scopes: state.scopes,
-      expiresAt: addSeconds(now, config.authorizationCodeTtlSeconds),
-      createdAt: now.toISOString(),
-    });
-
-    const redirectUrl = new URL(state.redirectUri);
-    redirectUrl.searchParams.set('code', authCode);
-    if (state.state) redirectUrl.searchParams.set('state', state.state);
-    if (state.returnTo) redirectUrl.searchParams.set('return_to', state.returnTo);
-    res.redirect(302, redirectUrl.toString());
+    await handleWechatCallback(config, store, req, res, 'wechat_official_account', (code) => wechat.exchangeOfficialOAuthCode(code));
   }));
 
-  router.get('/login/wechat/website', (_req, res) => {
-    res.status(501).json({
-      error: 'not_implemented',
-      error_description: 'wechat website QR login requires a WeChat Open Platform website app',
-    });
+  router.get('/login/wechat/website', (req, res) => {
+    const state = queryString(req, 'state');
+    const payload = state ? verifySignedState<OAuthAuthorizeState>(state, config.tokenSecret) : undefined;
+    if (!state || !payload || payload.provider !== 'wechat_website') {
+      res.status(400).json({ error: 'invalid_state' });
+      return;
+    }
+    if (config.allowMockWechat) {
+      res.redirect(302, `${config.publicBaseUrl}/login/wechat/website/callback?code=mock-code&state=${encodeURIComponent(state)}`);
+      return;
+    }
+    try {
+      res.redirect(302, wechat.buildWebsiteOAuthAuthorizeUrl(state));
+    } catch (error) {
+      res.status(503).json({
+        error: 'wechat_website_not_configured',
+        error_description: error instanceof Error ? error.message : 'WeChat website login is not configured.',
+      });
+    }
   });
+
+  router.get('/login/wechat/website/callback', asyncHandler(async (req, res) => {
+    await handleWechatCallback(config, store, req, res, 'wechat_website', (code) => wechat.exchangeWebsiteOAuthCode(code));
+  }));
 
   router.post('/login/wechat/miniprogram', (_req, res) => {
     res.status(501).json({
@@ -254,6 +250,101 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
   }));
 
   return router;
+}
+
+type PreparedLoginEntryState =
+  | { state: string }
+  | { status: number; error: string; errorDescription?: string };
+
+function prepareLoginEntryState(config: AuthServiceConfig, req: Request, entry: LoginEntry): PreparedLoginEntryState {
+  const client = findClient(config, entry.clientId);
+  if (!client || !client.redirectUris.includes(entry.defaultRedirectUri)) {
+    return { status: 500, error: 'server_error', errorDescription: 'login entry is not valid' };
+  }
+
+  const scopes = queryString(req, 'scope') ? parseScopes(queryString(req, 'scope')) : entry.defaultScopes;
+  if (!scopes.every((scope) => entry.defaultScopes.includes(scope) && client.scopes.includes(scope))) {
+    return { status: 400, error: 'invalid_scope' };
+  }
+
+  const returnTo = validateReturnTo(queryString(req, 'return_to'), entry);
+  if (returnTo instanceof Error) {
+    return { status: 400, error: 'invalid_request', errorDescription: returnTo.message };
+  }
+
+  return {
+    state: createSignedState(
+      {
+        clientId: client.clientId,
+        redirectUri: entry.defaultRedirectUri,
+        scopes,
+        provider: entry.provider,
+        loginEntrySlug: entry.slug,
+        returnTo,
+        state: queryString(req, 'state'),
+        codeChallenge: queryString(req, 'code_challenge'),
+        codeChallengeMethod: parseCodeChallengeMethod(queryString(req, 'code_challenge_method')),
+      },
+      config.tokenSecret,
+      config.authorizationCodeTtlSeconds
+    ),
+  };
+}
+
+async function handleWechatCallback(
+  config: AuthServiceConfig,
+  store: AuthStore,
+  req: Request,
+  res: Response,
+  expectedProvider: AuthIdentityProvider,
+  exchangeCode: (code: string) => Promise<WechatProfile>
+): Promise<void> {
+  const code = queryString(req, 'code');
+  const signedState = queryString(req, 'state');
+  const state = signedState ? verifySignedState<OAuthAuthorizeState>(signedState, config.tokenSecret) : undefined;
+  if (!code || !state || state.provider !== expectedProvider) {
+    res.status(400).json({ error: 'invalid_callback' });
+    return;
+  }
+
+  const profile = await exchangeCode(code);
+  const redirectUrl = await createAuthorizationRedirectUrl(config, store, state, profile);
+  if (!redirectUrl) {
+    res.status(400).json({ error: 'invalid_client' });
+    return;
+  }
+  res.redirect(302, redirectUrl);
+}
+
+async function createAuthorizationRedirectUrl(
+  config: AuthServiceConfig,
+  store: AuthStore,
+  state: OAuthAuthorizeState,
+  profile: WechatProfile
+): Promise<string | undefined> {
+  const client = findClient(config, state.clientId);
+  if (!client || !client.redirectUris.includes(state.redirectUri)) return undefined;
+
+  const result = await store.upsertWechatIdentity(profile);
+  const authCode = randomToken(32);
+  const now = new Date();
+  await store.createAuthorizationCode({
+    codeHash: sha256Base64Url(authCode),
+    clientId: client.clientId,
+    userId: result.user.id,
+    redirectUri: state.redirectUri,
+    codeChallenge: state.codeChallenge,
+    codeChallengeMethod: state.codeChallengeMethod,
+    scopes: state.scopes,
+    expiresAt: addSeconds(now, config.authorizationCodeTtlSeconds),
+    createdAt: now.toISOString(),
+  });
+
+  const redirectUrl = new URL(state.redirectUri);
+  redirectUrl.searchParams.set('code', authCode);
+  if (state.state) redirectUrl.searchParams.set('state', state.state);
+  if (state.returnTo) redirectUrl.searchParams.set('return_to', state.returnTo);
+  return redirectUrl.toString();
 }
 
 async function handleAuthorizationCodeGrant(
@@ -413,6 +504,28 @@ function parseScopes(scope: string | undefined): string[] {
 
 function parseCodeChallengeMethod(value: string | undefined): 'plain' | 'S256' | undefined {
   return value === 'plain' || value === 'S256' ? value : undefined;
+}
+
+function parseProvider(value: string | undefined): AuthIdentityProvider | undefined {
+  if (value === 'wechat_official_account' || value === 'wechat_website' || value === 'wechat_mini_program') return value;
+  return undefined;
+}
+
+function redirectToProviderLogin(
+  config: AuthServiceConfig,
+  res: Response,
+  provider: AuthIdentityProvider,
+  state: string
+): void {
+  if (provider === 'wechat_official_account') {
+    res.redirect(302, `${config.publicBaseUrl}/login/wechat/offiaccount?state=${encodeURIComponent(state)}`);
+    return;
+  }
+  if (provider === 'wechat_website') {
+    res.redirect(302, `${config.publicBaseUrl}/login/wechat/website?state=${encodeURIComponent(state)}`);
+    return;
+  }
+  res.status(501).json({ error: 'not_implemented', error_description: `${provider} login is not implemented` });
 }
 
 function redirectWithError(res: Response, redirectUri: string, error: string, state: string | undefined): void {

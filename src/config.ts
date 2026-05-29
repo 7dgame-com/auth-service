@@ -4,6 +4,8 @@ import type { AuthIdentityProvider, LoginEntry, OAuthClient } from './types';
 export interface WechatConfig {
   officialAppId?: string;
   officialAppSecret?: string;
+  websiteAppId?: string;
+  websiteAppSecret?: string;
   officialToken?: string;
   officialEncodingAesKey?: string;
   apiBaseUrl: string;
@@ -67,6 +69,12 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
     wechat: {
       officialAppId: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_ID', 'WECHAT_APP_ID']),
       officialAppSecret: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_SECRET', 'WECHAT_SECRET']),
+      websiteAppId: readFirstString(env, ['AUTH_WECHAT_WEBSITE_APP_ID', 'WECHAT_WEBSITE_APP_ID', 'WECHAT_OPEN_APP_ID']),
+      websiteAppSecret: readFirstString(env, [
+        'AUTH_WECHAT_WEBSITE_APP_SECRET',
+        'WECHAT_WEBSITE_APP_SECRET',
+        'WECHAT_OPEN_APP_SECRET',
+      ]),
       officialToken,
       officialEncodingAesKey: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_AES_KEY', 'WECHAT_AES_KEY']),
       apiBaseUrl: stripTrailingSlash(readString(env, 'AUTH_WECHAT_API_BASE_URL', 'https://api.weixin.qq.com')),
@@ -141,7 +149,7 @@ function defaultLoginEntries(oauthClients: OAuthClient[]): LoginEntry[] {
       defaultRedirectUri: 'https://3dugc.com/auth/callback',
       allowedReturnUrlPrefixes: ['https://3dugc.com/'],
       defaultScopes: ['openid', 'profile'],
-      provider: 'wechat_official_account',
+      provider: 'wechat_website',
       displayName: '3DUGC',
     });
   }

@@ -81,7 +81,7 @@
 - [ ] 增加 login entries 管理接口或 seed workflow。
 - [ ] 在未来登录页增加按 entry 区分的品牌展示。
 - [ ] 增加多微信 app provider 配置。
-- [ ] 实现 `/login/wechat/website`。
+- [x] 实现 `/login/wechat/website`。
 - [ ] 实现 `/login/wechat/miniprogram`。
 
 ## 完成定义

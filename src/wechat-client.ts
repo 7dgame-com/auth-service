@@ -48,6 +48,13 @@ export interface CreateQrCodeResult {
   url: string;
 }
 
+export interface WebsiteOAuthWidgetConfig {
+  appId: string;
+  redirectUri: string;
+  scope: 'snsapi_login';
+  state: string;
+}
+
 export class WechatClient {
   private accessToken: WechatAccessToken | undefined;
 
@@ -66,6 +73,27 @@ export class WechatClient {
     url.searchParams.set('scope', 'snsapi_userinfo');
     url.searchParams.set('state', state);
     return `${url.toString()}#wechat_redirect`;
+  }
+
+  buildWebsiteOAuthAuthorizeUrl(state: string): string {
+    const widget = this.buildWebsiteOAuthWidgetConfig(state);
+    const url = new URL('/connect/qrconnect', this.config.wechat.oauthBaseUrl);
+    url.searchParams.set('appid', widget.appId);
+    url.searchParams.set('redirect_uri', widget.redirectUri);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', widget.scope);
+    url.searchParams.set('state', widget.state);
+    return `${url.toString()}#wechat_redirect`;
+  }
+
+  buildWebsiteOAuthWidgetConfig(state: string): WebsiteOAuthWidgetConfig {
+    const callbackUrl = `${this.config.publicBaseUrl}/login/wechat/website/callback`;
+    return {
+      appId: this.requireWebsiteAppId(),
+      redirectUri: callbackUrl,
+      scope: 'snsapi_login',
+      state,
+    };
   }
 
   async createTemporaryQrCode(sceneToken: string, lifetimeSeconds: number): Promise<CreateQrCodeResult> {
@@ -181,6 +209,45 @@ export class WechatClient {
     };
   }
 
+  async exchangeWebsiteOAuthCode(code: string): Promise<WechatProfile> {
+    if (this.config.allowMockWechat) {
+      const openId = `mock-website-openid-${randomToken(6)}`;
+      return {
+        provider: 'wechat_website',
+        providerAppId: this.config.wechat.websiteAppId || 'mock-wechat-website-app-id',
+        openId,
+        unionId: `mock-website-union-${openId}`,
+        nickname: 'Mock Website WeChat User',
+        raw: { openid: openId, unionid: `mock-website-union-${openId}` },
+      };
+    }
+
+    const tokenUrl = new URL('/sns/oauth2/access_token', this.config.wechat.apiBaseUrl);
+    tokenUrl.searchParams.set('appid', this.requireWebsiteAppId());
+    tokenUrl.searchParams.set('secret', this.requireWebsiteSecret());
+    tokenUrl.searchParams.set('code', code);
+    tokenUrl.searchParams.set('grant_type', 'authorization_code');
+    const token = await getJson<WechatOAuthTokenResponse>(tokenUrl);
+    assertWechatOk(token, 'exchange website OAuth code');
+    if (!token.access_token || !token.openid) throw new Error('WeChat website OAuth response is missing access_token or openid.');
+
+    const userInfoUrl = new URL('/sns/userinfo', this.config.wechat.apiBaseUrl);
+    userInfoUrl.searchParams.set('access_token', token.access_token);
+    userInfoUrl.searchParams.set('openid', token.openid);
+    userInfoUrl.searchParams.set('lang', 'zh_CN');
+    const profile = await getJson<WechatOAuthUserInfo>(userInfoUrl);
+    assertWechatOk(profile, 'get website OAuth user info');
+    return {
+      provider: 'wechat_website',
+      providerAppId: this.requireWebsiteAppId(),
+      openId: token.openid,
+      unionId: profile.unionid || token.unionid,
+      nickname: profile.nickname,
+      avatarUrl: profile.headimgurl,
+      raw: { token, profile },
+    };
+  }
+
   private async getOfficialAccessToken(): Promise<string> {
     const now = Date.now();
     if (this.accessToken && this.accessToken.expiresAtMs > now + 60_000) return this.accessToken.token;
@@ -207,6 +274,18 @@ export class WechatClient {
   private requireOfficialSecret(): string {
     if (!this.config.wechat.officialAppSecret) throw new Error('AUTH_WECHAT_OFFICIAL_APP_SECRET or WECHAT_SECRET is required.');
     return this.config.wechat.officialAppSecret;
+  }
+
+  private requireWebsiteAppId(): string {
+    if (!this.config.wechat.websiteAppId) throw new Error('AUTH_WECHAT_WEBSITE_APP_ID or WECHAT_WEBSITE_APP_ID is required.');
+    return this.config.wechat.websiteAppId;
+  }
+
+  private requireWebsiteSecret(): string {
+    if (!this.config.wechat.websiteAppSecret) {
+      throw new Error('AUTH_WECHAT_WEBSITE_APP_SECRET or WECHAT_WEBSITE_APP_SECRET is required.');
+    }
+    return this.config.wechat.websiteAppSecret;
   }
 }
 
