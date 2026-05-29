@@ -139,7 +139,7 @@ AUTH_WECHAT_WEBSITE_APP_ID=wx...
 AUTH_WECHAT_WEBSITE_APP_SECRET=...
 ```
 
-`wechat_official_account` 使用公众号网页授权，适合微信客户端内打开；`wechat_website` 使用微信开放平台网站应用的 `/connect/qrconnect`，适合 PC 浏览器扫码登录。`/login/3dugc` 的内置默认 provider 是 `wechat_website`。未配置 `AUTH_WECHAT_WEBSITE_*` 时会沿用 `AUTH_WECHAT_OFFICIAL_*` / `WECHAT_*`，便于灰度验证；长期生产建议配置真正的微信开放平台网站应用 AppID 和 Secret。
+`wechat_official_account` 使用公众号网页授权，适合微信客户端内打开；`wechat_website` 优先使用微信开放平台网站应用的 `/connect/qrconnect`。`/login/3dugc` 的内置默认 provider 是 `wechat_website`；未配置 `AUTH_WECHAT_WEBSITE_*` 时，站内弹窗会自动降级为公众号临时二维码登录，通过 `/v1/wechat` 事件回调确认扫码结果，不再依赖 `snsapi_login` scope。
 
 ## 多 URL 登录入口
 
@@ -161,7 +161,7 @@ https://auth.bujiaban.com/login/bujiaban?return_to=https%3A%2F%2Fbujiaban.com%2F
 https://bujiaban.com/auth/callback?code=...&state=client-state&return_to=https%3A%2F%2Fbujiaban.com%2Fdashboard
 ```
 
-PC 端需要站内弹窗扫码时，可以请求 `/login/:slug/widget-config` 获取微信官方 `WxLogin` 所需的公开参数。该接口同样会校验 `return_to`、scope 和 PKCE，然后返回签名后的 provider state，不返回任何 Secret。
+PC 端需要站内弹窗扫码时，可以请求 `/login/:slug/widget-config` 获取二维码配置。配置了开放平台网站应用时返回微信官方 `WxLogin` 参数；只配置公众号时返回 `official_qr`、二维码图片 URL、轮询 token 和 `/login/wechat/offiaccount/scan-status` 状态接口。该接口同样会校验 `return_to`、scope 和 PKCE，然后返回签名后的 provider state，不返回任何 Secret。
 
 `redirect_uri` 仍然必须精确匹配 OAuth client 白名单；`return_to` 只允许匹配 `allowedReturnUrlPrefixes`，不能传任意外部 URL。
 

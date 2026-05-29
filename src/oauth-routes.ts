@@ -96,16 +96,16 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
     redirectToProviderLogin(config, res, provider, state);
   });
 
-  router.get('/login/:slug/widget-config', (req, res) => {
+  router.get('/login/:slug/widget-config', asyncHandler(async (req, res) => {
     const entry = findLoginEntry(config, req.params.slug);
     if (!entry) {
       res.status(404).json({ error: 'not_found', error_description: 'unknown login entry' });
       return;
     }
-    if (entry.provider !== 'wechat_website') {
+    if (entry.provider !== 'wechat_website' && entry.provider !== 'wechat_official_account') {
       res.status(400).json({
         error: 'unsupported_provider',
-        error_description: `${entry.provider} cannot be embedded as a website QR login widget`,
+        error_description: `${entry.provider} cannot be embedded as a WeChat QR login widget`,
       });
       return;
     }
@@ -115,7 +115,7 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
       res.status(prepared.status).json({ error: prepared.error, error_description: prepared.errorDescription });
       return;
     }
-    if (config.allowMockWechat) {
+    if (config.allowMockWechat && entry.provider === 'wechat_website' && wechat.hasWebsiteOAuthConfig()) {
       res.json({
         provider: 'wechat_website',
         mode: 'mock',
@@ -125,19 +125,42 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
     }
 
     try {
+      if (entry.provider === 'wechat_website' && wechat.hasWebsiteOAuthConfig()) {
+        res.json({
+          provider: 'wechat_website',
+          mode: 'widget',
+          ...wechat.buildWebsiteOAuthWidgetConfig(prepared.state),
+          selfRedirect: false,
+        });
+        return;
+      }
+      if (!wechat.hasOfficialQrCodeConfig()) {
+        res.status(503).json({
+          error: 'wechat_official_qr_not_configured',
+          error_description: 'AUTH_WECHAT_OFFICIAL_APP_ID and AUTH_WECHAT_OFFICIAL_APP_SECRET are required for official account QR login.',
+        });
+        return;
+      }
+      const sceneToken = randomToken(24);
+      const qrCode = await wechat.createTemporaryQrCode(sceneToken, Math.min(config.legacyScanTokenTtlSeconds, config.authorizationCodeTtlSeconds));
       res.json({
-        provider: 'wechat_website',
-        mode: 'widget',
-        ...wechat.buildWebsiteOAuthWidgetConfig(prepared.state),
+        provider: 'wechat_official_account',
+        mode: 'official_qr',
+        token: sceneToken,
+        state: prepared.state,
+        qrImageUrl: wechat.buildOfficialQrCodeImageUrl(qrCode.ticket),
+        expiresIn: qrCode.expire_seconds,
+        pollUrl: `${config.publicBaseUrl}/login/wechat/offiaccount/scan-status`,
+        pollIntervalMs: 2000,
         selfRedirect: false,
       });
     } catch (error) {
       res.status(503).json({
-        error: 'wechat_website_not_configured',
-        error_description: error instanceof Error ? error.message : 'WeChat website login is not configured.',
+        error: 'wechat_qr_not_configured',
+        error_description: error instanceof Error ? error.message : 'WeChat QR login is not configured.',
       });
     }
-  });
+  }));
 
   router.get('/login/:slug', (req, res) => {
     const entry = findLoginEntry(config, req.params.slug);
@@ -170,6 +193,30 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
 
   router.get('/login/wechat/offiaccount/callback', asyncHandler(async (req, res) => {
     await handleWechatCallback(config, store, req, res, 'wechat_official_account', (code) => wechat.exchangeOfficialOAuthCode(code));
+  }));
+
+  router.get('/login/wechat/offiaccount/scan-status', asyncHandler(async (req, res) => {
+    const token = queryString(req, 'token');
+    const signedState = queryString(req, 'state');
+    const state = signedState ? verifySignedState<OAuthAuthorizeState>(signedState, config.tokenSecret) : undefined;
+    if (!token || !state || (state.provider !== 'wechat_website' && state.provider !== 'wechat_official_account')) {
+      res.status(400).json({ error: 'invalid_request' });
+      return;
+    }
+
+    const scanToken = await store.findLegacyScanToken(token);
+    if (!scanToken) {
+      res.json({ status: 'pending' });
+      return;
+    }
+
+    const profile = await wechat.getOfficialUserInfo(scanToken.openId);
+    const redirectUrl = await createAuthorizationRedirectUrl(config, store, state, profile);
+    if (!redirectUrl) {
+      res.status(400).json({ error: 'invalid_client' });
+      return;
+    }
+    res.json({ status: 'confirmed', redirectUrl });
   }));
 
   router.get('/login/wechat/website', (req, res) => {

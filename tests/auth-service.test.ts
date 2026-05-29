@@ -433,6 +433,80 @@ describe('unified auth service', () => {
     expect(qrConnectUrl.searchParams.get('scope')).toBe('snsapi_login');
   });
 
+  it('uses an official account QR widget when website login credentials are not configured', async () => {
+    const config = createConfig({
+      AUTH_PUBLIC_BASE_URL: 'http://127.0.0.1',
+      AUTH_ALLOW_MOCK_WECHAT: 'true',
+      AUTH_WECHAT_OFFICIAL_APP_ID: 'wx-official',
+      AUTH_TOKEN_SECRET: 'test-secret',
+    });
+    const store = new MemoryAuthStore();
+    const app = await startApp(config, store);
+    const verifier = 'official-qr-pkce-verifier';
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+
+    const widgetUrl = new URL(`${app.baseUrl}/login/3dugc/widget-config`);
+    widgetUrl.searchParams.set('state', 'official-qr-state');
+    widgetUrl.searchParams.set('code_challenge', challenge);
+    widgetUrl.searchParams.set('code_challenge_method', 'S256');
+    const widgetResponse = await fetch(widgetUrl);
+    expect(widgetResponse.status).toBe(200);
+    const widget = await widgetResponse.json() as {
+      provider: string;
+      mode: string;
+      token: string;
+      state: string;
+      qrImageUrl: string;
+      pollUrl: string;
+      expiresIn: number;
+    };
+    expect(widget).toMatchObject({
+      provider: 'wechat_official_account',
+      mode: 'official_qr',
+      pollUrl: `${app.baseUrl}/login/wechat/offiaccount/scan-status`,
+    });
+    expect(widget.token).toBeTruthy();
+    expect(widget.qrImageUrl).toContain('/cgi-bin/showqrcode');
+    expect(widget.state).toBeTruthy();
+    expect(widget.expiresIn).toBeGreaterThan(0);
+
+    const pendingUrl = new URL(widget.pollUrl);
+    pendingUrl.searchParams.set('token', widget.token);
+    pendingUrl.searchParams.set('state', widget.state);
+    const pendingResponse = await fetch(pendingUrl);
+    expect(await pendingResponse.json()).toMatchObject({ status: 'pending' });
+
+    const pushResponse = await fetch(`${app.baseUrl}/v1/wechat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/xml' },
+      body: createWechatEventXml(widget.token, 'openid-official-qr'),
+    });
+    expect(pushResponse.status).toBe(200);
+
+    const confirmedResponse = await fetch(pendingUrl);
+    expect(confirmedResponse.status).toBe(200);
+    const confirmed = await confirmedResponse.json() as { status: string; redirectUrl: string };
+    expect(confirmed.status).toBe('confirmed');
+    const callbackUrl = new URL(confirmed.redirectUrl);
+    expect(callbackUrl.origin + callbackUrl.pathname).toBe('https://3dugc.com/auth/callback');
+    expect(callbackUrl.searchParams.get('state')).toBe('official-qr-state');
+    const code = callbackUrl.searchParams.get('code');
+    expect(code).toBeTruthy();
+
+    const tokenResponse = await fetch(`${app.baseUrl}/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: '3dugc-web',
+        redirect_uri: 'https://3dugc.com/auth/callback',
+        code: code || '',
+        code_verifier: verifier,
+      }),
+    });
+    expect(tokenResponse.status).toBe(200);
+  });
+
   it('completes OAuth through a mocked WeChat website callback', async () => {
     const config = createConfig({
       AUTH_PUBLIC_BASE_URL: 'http://127.0.0.1',

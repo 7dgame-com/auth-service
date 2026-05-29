@@ -64,6 +64,14 @@ export class WechatClient {
     return this.config.wechat.officialAppId || 'mock-wechat-app-id';
   }
 
+  hasOfficialQrCodeConfig(): boolean {
+    return this.config.allowMockWechat || Boolean(this.config.wechat.officialAppId && this.config.wechat.officialAppSecret);
+  }
+
+  hasWebsiteOAuthConfig(): boolean {
+    return Boolean(this.config.wechat.websiteAppId && this.config.wechat.websiteAppSecret);
+  }
+
   buildOfficialOAuthAuthorizeUrl(state: string): string {
     const callbackUrl = `${this.config.publicBaseUrl}/login/wechat/offiaccount/callback`;
     const url = new URL('/connect/oauth2/authorize', this.config.wechat.oauthBaseUrl);
@@ -94,6 +102,12 @@ export class WechatClient {
       scope: 'snsapi_login',
       state,
     };
+  }
+
+  buildOfficialQrCodeImageUrl(ticket: string): string {
+    const url = new URL('/cgi-bin/showqrcode', 'https://mp.weixin.qq.com');
+    url.searchParams.set('ticket', ticket);
+    return url.toString();
   }
 
   async createTemporaryQrCode(sceneToken: string, lifetimeSeconds: number): Promise<CreateQrCodeResult> {
