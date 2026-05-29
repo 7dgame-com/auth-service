@@ -47,14 +47,14 @@ AUTH_LOGIN_ENTRIES_JSON='[
 ]'
 ```
 
-`wechat_website` 需要微信开放平台网站应用凭据：
+`wechat_website` 建议配置微信开放平台网站应用凭据：
 
 ```text
 AUTH_WECHAT_WEBSITE_APP_ID=<wechat-open-platform-website-appid>
 AUTH_WECHAT_WEBSITE_APP_SECRET=<wechat-open-platform-website-secret>
 ```
 
-公众号网页授权使用 `wechat_official_account`，只能在微信客户端内正常打开；PC 浏览器扫码登录应使用 `wechat_website`。
+未配置时 auth-service 会沿用 `AUTH_WECHAT_OFFICIAL_*` / `WECHAT_*` 作为灰度 fallback。公众号网页授权使用 `wechat_official_account`，只能在微信客户端内正常打开；PC 浏览器扫码登录应使用 `wechat_website`，长期生产应替换为真正的网站应用凭据。
 
 如果同一个 auth-service 还服务 `bujiaban`，不要只配置 `3dugc` 而漏掉其他 client/entry；显式 JSON 会覆盖内置默认值。
 

@@ -139,7 +139,7 @@ AUTH_WECHAT_WEBSITE_APP_ID=wx...
 AUTH_WECHAT_WEBSITE_APP_SECRET=...
 ```
 
-`wechat_official_account` 使用公众号网页授权，适合微信客户端内打开；`wechat_website` 使用微信开放平台网站应用的 `/connect/qrconnect`，适合 PC 浏览器扫码登录。`/login/3dugc` 的内置默认 provider 是 `wechat_website`，生产环境需要配置微信开放平台网站应用的 AppID 和 Secret。公众号 AppID/Secret 不能直接替代网站应用凭据。
+`wechat_official_account` 使用公众号网页授权，适合微信客户端内打开；`wechat_website` 使用微信开放平台网站应用的 `/connect/qrconnect`，适合 PC 浏览器扫码登录。`/login/3dugc` 的内置默认 provider 是 `wechat_website`。未配置 `AUTH_WECHAT_WEBSITE_*` 时会沿用 `AUTH_WECHAT_OFFICIAL_*` / `WECHAT_*`，便于灰度验证；长期生产建议配置真正的微信开放平台网站应用 AppID 和 Secret。
 
 ## 多 URL 登录入口
 

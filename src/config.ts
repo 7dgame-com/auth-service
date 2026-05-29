@@ -45,6 +45,8 @@ export interface AuthServiceConfig {
 
 export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceConfig {
   const publicBaseUrl = stripTrailingSlash(readString(env, 'AUTH_PUBLIC_BASE_URL', 'http://localhost:3010'));
+  const officialAppId = readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_ID', 'WECHAT_APP_ID']);
+  const officialAppSecret = readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_SECRET', 'WECHAT_SECRET']);
   const officialToken = readFirstString(env, ['AUTH_WECHAT_OFFICIAL_TOKEN', 'WECHAT_TOKEN']);
   const oauthClients = readOAuthClients(env, publicBaseUrl);
 
@@ -67,14 +69,14 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
     oauthClients,
     loginEntries: readLoginEntries(env, oauthClients),
     wechat: {
-      officialAppId: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_ID', 'WECHAT_APP_ID']),
-      officialAppSecret: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_SECRET', 'WECHAT_SECRET']),
-      websiteAppId: readFirstString(env, ['AUTH_WECHAT_WEBSITE_APP_ID', 'WECHAT_WEBSITE_APP_ID', 'WECHAT_OPEN_APP_ID']),
+      officialAppId,
+      officialAppSecret,
+      websiteAppId: readFirstString(env, ['AUTH_WECHAT_WEBSITE_APP_ID', 'WECHAT_WEBSITE_APP_ID', 'WECHAT_OPEN_APP_ID']) || officialAppId,
       websiteAppSecret: readFirstString(env, [
         'AUTH_WECHAT_WEBSITE_APP_SECRET',
         'WECHAT_WEBSITE_APP_SECRET',
         'WECHAT_OPEN_APP_SECRET',
-      ]),
+      ]) || officialAppSecret,
       officialToken,
       officialEncodingAesKey: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_AES_KEY', 'WECHAT_AES_KEY']),
       apiBaseUrl: stripTrailingSlash(readString(env, 'AUTH_WECHAT_API_BASE_URL', 'https://api.weixin.qq.com')),
