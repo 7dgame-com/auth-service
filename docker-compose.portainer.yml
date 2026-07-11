@@ -20,7 +20,7 @@ services:
 
       # New-style config. Prefer these for new services.
       - AUTH_DATABASE_URL=
-      - AUTH_TOKEN_SECRET=
+      - AUTH_TOKEN_SECRET=${AUTH_TOKEN_SECRET:?AUTH_TOKEN_SECRET is required}
       - AUTH_WECHAT_OFFICIAL_APP_ID=
       - AUTH_WECHAT_OFFICIAL_APP_SECRET=
       - AUTH_WECHAT_OFFICIAL_TOKEN=
@@ -32,7 +32,6 @@ services:
       - MYSQL_DB=
       - MYSQL_USERNAME=
       - MYSQL_PASSWORD=
-      - JWT_KEY=/var/www/.ssh/ecc-private-key.pem
       - WECHAT_APP_ID=
       - WECHAT_SECRET=
       - WECHAT_TOKEN=
@@ -40,11 +39,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
-    security_opt:
-      - seccomp:unconfined
     restart: always
-    volumes:
-      - /home/ubuntu/src/ssh/:/var/www/.ssh/
 
 networks:
   proxy:

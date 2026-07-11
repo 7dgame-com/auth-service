@@ -11,5 +11,5 @@ services:
       - AUTH_PUBLIC_BASE_URL=http://localhost:3010
       - AUTH_DATABASE_AUTO_MIGRATE=false
       - AUTH_ALLOW_MOCK_WECHAT=true
-      - AUTH_TOKEN_SECRET=local-dev-secret
+      - AUTH_TOKEN_SECRET=${AUTH_TOKEN_SECRET:?AUTH_TOKEN_SECRET is required}
     restart: unless-stopped

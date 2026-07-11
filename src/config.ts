@@ -1,5 +1,10 @@
 import fs from 'fs';
+import { randomBytes } from 'crypto';
 import type { AuthIdentityProvider, LoginEntry, OAuthClient } from './types';
+
+// Development instances need a signing secret too, but it must not be a
+// repository-known value that could accidentally be promoted to production.
+const ephemeralDevelopmentTokenSecret = randomBytes(32).toString('hex');
 
 export interface WechatConfig {
   officialAppId?: string;
@@ -236,13 +241,39 @@ function isHttpsOrLocalHttp(url: URL): boolean {
 
 function readTokenSecret(env: NodeJS.ProcessEnv): string {
   const configured = readOptionalString(env, 'AUTH_TOKEN_SECRET');
-  if (configured) return configured;
+  if (configured) return assertTokenSecretStrength(configured, env);
 
   const jwtKey = readOptionalString(env, 'JWT_KEY');
-  if (jwtKey && fs.existsSync(jwtKey)) return fs.readFileSync(jwtKey, 'utf8').trim();
-  if (jwtKey) return jwtKey;
+  if (jwtKey && fs.existsSync(jwtKey)) return assertTokenSecretStrength(fs.readFileSync(jwtKey, 'utf8').trim(), env);
 
-  return 'dev-auth-token-secret-change-me';
+  // Keep compatibility with legacy deployments that supplied the secret value
+  // directly as JWT_KEY.  A filesystem-looking value is never a valid secret.
+  if (jwtKey && !looksLikeFilePath(jwtKey)) return assertTokenSecretStrength(jwtKey, env);
+
+  // A path is not a secret.  Falling back to it made a missing mounted key
+  // equivalent to publishing a predictable signing key in production.
+  if (isProduction(env)) {
+    throw new Error('AUTH_TOKEN_SECRET or a readable JWT_KEY file is required in production');
+  }
+
+  // Development can run without extra setup, but gets a fresh process-local
+  // secret rather than a predictable repository default.
+  return readOptionalString(env, 'AUTH_DEV_TOKEN_SECRET') ?? ephemeralDevelopmentTokenSecret;
+}
+
+function assertTokenSecretStrength(secret: string, env: NodeJS.ProcessEnv): string {
+  if (isProduction(env) && Buffer.byteLength(secret, 'utf8') < 32) {
+    throw new Error('AUTH_TOKEN_SECRET must contain at least 32 bytes in production');
+  }
+  return secret;
+}
+
+function isProduction(env: NodeJS.ProcessEnv): boolean {
+  return (env.NODE_ENV ?? env.APP_ENV ?? '').trim().toLowerCase() === 'production';
+}
+
+function looksLikeFilePath(value: string): boolean {
+  return value.startsWith('/') || value.startsWith('./') || value.startsWith('../');
 }
 
 function readDatabaseUrl(env: NodeJS.ProcessEnv): string | undefined {
