@@ -59,6 +59,20 @@ describe('unified auth service', () => {
     });
   });
 
+  it('refuses a production signing-secret fallback when no key file is mounted', () => {
+    expect(() => createConfig({
+      NODE_ENV: 'production',
+      JWT_KEY: '/missing/production-jwt.key',
+    })).toThrow('AUTH_TOKEN_SECRET or a readable JWT_KEY file is required in production');
+  });
+
+  it('refuses a short production signing secret', () => {
+    expect(() => createConfig({
+      NODE_ENV: 'production',
+      AUTH_TOKEN_SECRET: 'too-short',
+    })).toThrow('AUTH_TOKEN_SECRET must contain at least 32 bytes in production');
+  });
+
   it('accepts configured login entries and rejects invalid login entry wiring', () => {
     const loginEntries = [
       {
