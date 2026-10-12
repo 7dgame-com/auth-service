@@ -1,0 +1,23 @@
+# Review template only. This does not replace the production F auth-service.
+services:
+  development-wechat-provider:
+    image: ${DEVELOPMENT_WECHAT_PROVIDER_IMAGE:?Set a reviewed image@sha256 digest}
+    command: ["node", "dist/development-provider-run.js"]
+    restart: unless-stopped
+    env_file:
+      - ./development-wechat.env
+    expose: ["3011"]
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+    networks:
+      - identity-development
+      - development-provider-ingress
+    # Add only the reviewed HTTPS ingress route for the callback adapter.
+    # Do not attach production account DB/Redis volumes or copy WeChat secrets.
+networks:
+  identity-development:
+    external: true
+    name: ${IDENTITY_DEVELOPMENT_NETWORK:?Set the development Identity network}
+  development-provider-ingress:
+    external: true
+    name: ${DEVELOPMENT_PROVIDER_INGRESS_NETWORK:?Set the reviewed callback ingress network}

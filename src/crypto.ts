@@ -95,7 +95,7 @@ export function decryptWechatMessage(encrypted: string, encodingAesKey: string, 
   const message = decrypted.subarray(messageStart, messageEnd).toString('utf8');
   const appId = decrypted.subarray(messageEnd).toString('utf8');
 
-  if (expectedAppId && appId && appId !== expectedAppId) {
+  if (expectedAppId && appId !== expectedAppId) {
     throw new Error('WeChat encrypted message app_id does not match configured app id.');
   }
   return message;

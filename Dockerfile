@@ -24,6 +24,7 @@ RUN npm ci --omit=dev --cache /tmp/.npm-cache \
     && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
+COPY deploy/mysql/development-wechat-registry.sql ./deploy/mysql/development-wechat-registry.sql
 
 EXPOSE 3010
 CMD ["node", "dist/run.js"]

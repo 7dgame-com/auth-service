@@ -1,6 +1,7 @@
 import fs from 'fs';
 import { randomBytes } from 'crypto';
 import type { AuthIdentityProvider, LoginEntry, OAuthClient } from './types';
+import { readDevelopmentWechatRelayConfig, type DevelopmentWechatRelayConfig } from './development-wechat-relay';
 
 // Development instances need a signing secret too, but it must not be a
 // repository-known value that could accidentally be promoted to production.
@@ -46,6 +47,7 @@ export interface AuthServiceConfig {
   oauthClients: OAuthClient[];
   loginEntries: LoginEntry[];
   wechat: WechatConfig;
+  developmentWechatRelay?: DevelopmentWechatRelayConfig;
 }
 
 export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceConfig {
@@ -58,6 +60,16 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
   const allowMockWechat = readBoolean(env, 'AUTH_ALLOW_MOCK_WECHAT', false);
   if (dataSource === 'identity' && !allowMockWechat && !officialToken) throw new Error('Verified WeChat callbacks require AUTH_WECHAT_OFFICIAL_TOKEN in identity mode');
   if (dataSource === 'identity' && allowMockWechat && isProduction(env)) throw new Error('Mock WeChat is unavailable in production identity mode');
+  const wechat: WechatConfig = {
+    officialAppId: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_ID', 'WECHAT_APP_ID']),
+    officialAppSecret: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_SECRET', 'WECHAT_SECRET']),
+    officialToken,
+    officialEncodingAesKey: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_AES_KEY', 'WECHAT_AES_KEY']),
+    apiBaseUrl: stripTrailingSlash(readString(env, 'AUTH_WECHAT_API_BASE_URL', 'https://api.weixin.qq.com')),
+    oauthBaseUrl: stripTrailingSlash(readString(env, 'AUTH_WECHAT_OAUTH_BASE_URL', 'https://open.weixin.qq.com')),
+    signatureRequired: dataSource === 'identity' && !allowMockWechat ? true : readBoolean(env, 'AUTH_WECHAT_SIGNATURE_REQUIRED', Boolean(officialToken)),
+  };
+  const developmentWechatRelay = readDevelopmentWechatRelayConfig(env, wechat, allowMockWechat);
 
   return {
     dataSource,
@@ -79,15 +91,8 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
     allowMockWechat,
     oauthClients,
     loginEntries: readLoginEntries(env, oauthClients),
-    wechat: {
-      officialAppId: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_ID', 'WECHAT_APP_ID']),
-      officialAppSecret: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_APP_SECRET', 'WECHAT_SECRET']),
-      officialToken,
-      officialEncodingAesKey: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_AES_KEY', 'WECHAT_AES_KEY']),
-      apiBaseUrl: stripTrailingSlash(readString(env, 'AUTH_WECHAT_API_BASE_URL', 'https://api.weixin.qq.com')),
-      oauthBaseUrl: stripTrailingSlash(readString(env, 'AUTH_WECHAT_OAUTH_BASE_URL', 'https://open.weixin.qq.com')),
-      signatureRequired: dataSource === 'identity' && !allowMockWechat ? true : readBoolean(env, 'AUTH_WECHAT_SIGNATURE_REQUIRED', Boolean(officialToken)),
-    },
+    wechat,
+    developmentWechatRelay,
   };
 }
 
