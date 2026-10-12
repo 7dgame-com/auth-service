@@ -1,0 +1,129 @@
+name: Identity development candidate
+
+on:
+  push:
+    branches: [codex/identity-online-dev-20261012]
+  workflow_dispatch:
+    inputs:
+      publish_candidate:
+        description: Publish only this commit's candidate image (no deployment)
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: identity-candidate-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: hkccr.ccs.tencentyun.com
+  HUSKY: "0"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      IDENTITY_TEST_MYSQL: "1"
+      IDENTITY_DB_HOST: 127.0.0.1
+      IDENTITY_DB_PORT: "3306"
+      IDENTITY_DB_USER: root
+      IDENTITY_DB_PASSWORD: ""
+    steps:
+      - name: Guard candidate source
+        env:
+          CANDIDATE_REF: ${{ github.ref }}
+        run: |
+          test "$CANDIDATE_REF" = refs/heads/codex/identity-online-dev-20261012
+          test "$GITHUB_EVENT_NAME" = push || test "$GITHUB_EVENT_NAME" = workflow_dispatch
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run lint
+
+  candidate:
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: auth-service
+            image: hkccr.ccs.tencentyun.com/plugins/auth-service
+            context: .
+            file: ./Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in for candidate publication
+        if: github.event_name == 'push' || inputs.publish_candidate == true
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.TENCENT_REGISTRY_USERNAME || secrets.TENCENT_REGISTRY_USER }}
+          password: ${{ secrets.TENCENT_REGISTRY_PASSWORD }}
+      - name: Build this commit's candidate
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' || inputs.publish_candidate == true }}
+          tags: ${{ matrix.image }}:candidate-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          build-args: |
+            BUILD_REVISION=${{ github.sha }}
+            GIT_SHA=${{ github.sha }}
+          provenance: true
+          cache-from: type=gha,scope=identity-candidate-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=identity-candidate-${{ matrix.name }}
+      - name: Record source and image digest
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          CANDIDATE_IMAGE: ${{ matrix.image }}:candidate-${{ github.sha }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          PUBLISHED: ${{ github.event_name == 'push' || inputs.publish_candidate == true }}
+        run: |
+          jq -n \
+            --arg sourceSha "$SOURCE_SHA" \
+            --arg repository "$SOURCE_REPOSITORY" \
+            --arg image "$CANDIDATE_IMAGE" \
+            --arg digest "$IMAGE_DIGEST" \
+            --argjson published "$PUBLISHED" \
+            '{sourceSha: $sourceSha, repository: $repository, image: $image, digest: $digest, platform: "linux/amd64", published: $published}' \
+            > candidate-image.json
+          printf 'Candidate: `%s`\n\nSource: `%s`\n\nDigest: `%s`\n\nPublished: `%s`\n' \
+            "$CANDIDATE_IMAGE" "$SOURCE_SHA" "$IMAGE_DIGEST" "$PUBLISHED" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ matrix.name }}-${{ github.sha }}
+          path: candidate-image.json
+          retention-days: 30
