@@ -11,6 +11,7 @@ import {
 import type { AuthStore } from './store';
 import { addSeconds } from './store';
 import type { WechatClient } from './wechat-client';
+import { DEVELOPMENT_WECHAT_SCENE_PREFIX, type DevelopmentWechatRelay } from './development-wechat-relay';
 
 interface WechatEventMessage {
   ToUserName?: string;
@@ -20,7 +21,7 @@ interface WechatEventMessage {
   EventKey?: string;
 }
 
-export function createLegacyWechatRouter(config: AuthServiceConfig, store: AuthStore, wechat: WechatClient): Router {
+export function createLegacyWechatRouter(config: AuthServiceConfig, store: AuthStore, wechat: WechatClient, developmentRelay?: DevelopmentWechatRelay): Router {
   const router = Router();
   const xmlParser = express.text({ type: ['application/xml', 'text/xml', '*/xml', 'text/plain', '*/*'], limit: '1mb' });
 
@@ -34,13 +35,21 @@ export function createLegacyWechatRouter(config: AuthServiceConfig, store: AuthS
       return;
     }
     const message = parseWechatXml(incoming.xml);
-    const reply = await handleWechatEvent(config, store, message);
+    const scene = normalizeSceneToken(message.EventKey || '');
+    const developmentEvent = message.MsgType === 'event' && (message.Event === 'SCAN' || message.Event === 'subscribe') && scene.startsWith(DEVELOPMENT_WECHAT_SCENE_PREFIX);
+    if (developmentEvent && incoming.encrypted && developmentRelay && message.FromUserName) {
+      await developmentRelay.confirm(scene, message.FromUserName, queryString(req, 'timestamp'));
+    }
+    // Reserved scenes never enter the production legacy store, including while
+    // disabled, unknown, expired, malformed, or without body authentication.
+    const reply = developmentEvent ? '欢迎登陆平台，祝你永不加班～' : await handleWechatEvent(config, store, message);
     const replyXml = createWechatTextReply(message, reply);
     res.type('application/xml').send(incoming.encrypted ? createEncryptedWechatReply(config, req, replyXml) : replyXml);
   }));
 
   router.get('/wechat/qrcode', asyncHandler(async (_req, res) => {
-    const token = randomToken(24);
+    let token: string;
+    do { token = randomToken(24); } while (token.startsWith(DEVELOPMENT_WECHAT_SCENE_PREFIX));
     const qrcode = await wechat.createTemporaryQrCode(token, config.legacyScanTokenTtlSeconds);
     res.json({ success: true, message: 'create qrcode', qrcode, token });
   }));

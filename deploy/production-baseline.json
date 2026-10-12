@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "baseRevision": "48856f180abe06058630cf3461af2231768bcb8c",
+  "preservedFiles": [
+    {
+      "path": "src/mysql-store.ts",
+      "sha256": "6dfe17a136198d3957bf88d3a33263c0183fa264c37b89f0943ac3ed708b638f"
+    },
+    {
+      "path": "src/legacy-redis.ts",
+      "sha256": "314e4613d9c2ad798b9ef93aca2361cae35336c67ad89c860af5c334e6605dbc"
+    },
+    {
+      "path": "src/memory-store.ts",
+      "sha256": "2dbd782ed9f8670f33970a57cfea18d1e81abe381f90e2c4b3a24ca89ce363a8"
+    },
+    {
+      "path": "src/oauth-routes.ts",
+      "sha256": "cccc873440d1b90554c22ac8ef927be9ee32afc5dc92644fe39ebbb455af1b57"
+    },
+    {
+      "path": "src/wechat-client.ts",
+      "sha256": "9117ea6053421b82b45f90681617a3bb70344eadcd604eab8df0d4b863803da7"
+    },
+    {
+      "path": "src/store.ts",
+      "sha256": "8540b4368172947070476d04575e85710b43ffa50c3cd521e69a39a5998595d6"
+    },
+    {
+      "path": "src/types.ts",
+      "sha256": "eafa4a961c97547f1836cff148607b4cdcf627823e80e93c178c7d48def9961d"
+    },
+    {
+      "path": "src/run.ts",
+      "sha256": "e7004e56391717fb05c445b0a1ba6991ab55ac56ada7120b752bbf3365e9ea02"
+    },
+    {
+      "path": "src/logger.ts",
+      "sha256": "208eab99a3425a296f3d13d510a9b9e7b0c62f5aa38c0eb10ac025706eb7a526"
+    },
+    {
+      "path": "tests/auth-service.test.ts",
+      "sha256": "255f369d71a938eb05e122eb0265dd83bca3fd19f10ea7829c7e3a255dede979"
+    }
+  ]
+}

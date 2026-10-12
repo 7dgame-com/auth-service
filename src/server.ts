@@ -11,6 +11,7 @@ import { createOAuthRouter } from './oauth-routes';
 import type { AuthStore } from './store';
 import { WechatClient } from './wechat-client';
 import logger from './logger';
+import { DevelopmentWechatRelay, DevelopmentWechatRelayUnavailable } from './development-wechat-relay';
 
 export interface AuthServiceRuntime {
   app: Express;
@@ -28,6 +29,7 @@ export async function createRuntime(config = createConfig()): Promise<AuthServic
 
 export function createApp(config: AuthServiceConfig, store: AuthStore, wechat: WechatClient): Express {
   const app = express();
+  const developmentRelay = config.developmentWechatRelay ? new DevelopmentWechatRelay(config.developmentWechatRelay, wechat) : undefined;
 
   app.set('trust proxy', true);
   app.use(cors({
@@ -54,7 +56,8 @@ export function createApp(config: AuthServiceConfig, store: AuthStore, wechat: W
     });
   });
 
-  app.use('/v1', createLegacyWechatRouter(config, store, wechat));
+  if (developmentRelay) app.use('/internal/development-wechat', developmentRelay.router());
+  app.use('/v1', createLegacyWechatRouter(config, store, wechat, developmentRelay));
   app.use(createOAuthRouter(config, store, wechat));
 
   app.use((_req, res) => {
@@ -62,6 +65,10 @@ export function createApp(config: AuthServiceConfig, store: AuthStore, wechat: W
   });
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (error instanceof DevelopmentWechatRelayUnavailable) {
+      if (!res.headersSent) res.status(503).json({ error: 'development_relay_unavailable' });
+      return;
+    }
     logger.error({ error }, 'Auth service request failed');
     if (res.headersSent) return;
     res.status(500).json({

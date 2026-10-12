@@ -1,6 +1,7 @@
 import fs from 'fs';
 import { randomBytes } from 'crypto';
 import type { AuthIdentityProvider, LoginEntry, OAuthClient } from './types';
+import { readDevelopmentWechatRelayConfig, type DevelopmentWechatRelayConfig } from './development-wechat-relay';
 
 // Development instances need a signing secret too, but it must not be a
 // repository-known value that could accidentally be promoted to production.
@@ -46,6 +47,7 @@ export interface AuthServiceConfig {
   oauthClients: OAuthClient[];
   loginEntries: LoginEntry[];
   wechat: WechatConfig;
+  developmentWechatRelay?: DevelopmentWechatRelayConfig;
 }
 
 export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceConfig {
@@ -61,7 +63,7 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
   ]);
   const oauthClients = readOAuthClients(env, publicBaseUrl);
 
-  return {
+  const config: AuthServiceConfig = {
     host: readString(env, 'AUTH_SERVICE_HOST', '0.0.0.0'),
     port: readNumber(env, 'AUTH_SERVICE_PORT', 3010),
     publicBaseUrl,
@@ -91,6 +93,9 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
       signatureRequired: readBoolean(env, 'AUTH_WECHAT_SIGNATURE_REQUIRED', Boolean(officialToken)),
     },
   };
+  const relay = readDevelopmentWechatRelayConfig(env, config.wechat, config.allowMockWechat);
+  if (relay) config.developmentWechatRelay = relay;
+  return config;
 }
 
 function readOAuthClients(env: NodeJS.ProcessEnv, publicBaseUrl: string): OAuthClient[] {

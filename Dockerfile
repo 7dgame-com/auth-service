@@ -12,6 +12,9 @@ RUN npm run build
 FROM node:22-bookworm-slim
 
 WORKDIR /app
+ARG BUILD_REVISION=unknown
+LABEL org.opencontainers.image.revision=$BUILD_REVISION
+ENV BUILD_REVISION=$BUILD_REVISION
 ENV NODE_ENV=production \
     AUTH_SERVICE_HOST=0.0.0.0 \
     AUTH_SERVICE_PORT=3010
