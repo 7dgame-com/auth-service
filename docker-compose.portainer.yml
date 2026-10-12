@@ -9,6 +9,9 @@ services:
       - "traefik.http.routers.b1_bujiaban_com-secure.entrypoints=websecure"
       - "traefik.http.routers.b1_bujiaban_com-secure.rule=Host(`auth.bujiaban.com`)"
       - "traefik.http.routers.b1_bujiaban_com-secure.middlewares=test-compress@file"
+      - "traefik.http.routers.b1_bujiaban_com-secure.tls=true"
+      - "traefik.http.routers.b1_bujiaban_com-secure.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.b1_bujiaban_com-secure.service=b1_bujiaban_com"
       - "traefik.http.services.b1_bujiaban_com.loadbalancer.server.port=3010"
     environment:
       - NODE_ENV=production
