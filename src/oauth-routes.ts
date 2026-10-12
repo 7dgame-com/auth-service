@@ -39,9 +39,10 @@ interface TokenSet {
 export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, wechat: WechatClient): Router {
   const router = Router();
 
-  router.get('/.well-known/openid-configuration', (_req, res) => {
+  router.get('/.well-known/openid-configuration', asyncHandler(async (_req, res) => {
+    const authorityMetadata = await store.identityAuthority?.metadata();
     res.json({
-      issuer: config.publicBaseUrl,
+      issuer: authorityMetadata?.issuer || config.publicBaseUrl,
       authorization_endpoint: `${config.publicBaseUrl}/oauth/authorize`,
       token_endpoint: `${config.publicBaseUrl}/oauth/token`,
       userinfo_endpoint: `${config.publicBaseUrl}/userinfo`,
@@ -53,13 +54,13 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
       token_endpoint_auth_methods_supported: ['none', 'client_secret_post'],
       code_challenge_methods_supported: ['plain', 'S256'],
       subject_types_supported: ['public'],
-      id_token_signing_alg_values_supported: ['HS256'],
+      id_token_signing_alg_values_supported: [authorityMetadata ? 'ES256' : 'HS256'],
     });
-  });
+  }));
 
-  router.get('/.well-known/jwks.json', (_req, res) => {
-    res.json({ keys: [] });
-  });
+  router.get('/.well-known/jwks.json', asyncHandler(async (_req, res) => {
+    res.json({ keys: (await store.identityAuthority?.metadata())?.keys || [] });
+  }));
 
   router.get('/oauth/authorize', (req, res) => {
     const client = findClient(config, queryString(req, 'client_id'));
@@ -216,6 +217,12 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
     }
 
     const grantType = bodyString(req, 'grant_type');
+    if (store.identityAuthority) {
+      res.json(await store.identityAuthority.token({
+        ...(req.body as Record<string, unknown>), client_id: client.clientId,
+      }));
+      return;
+    }
     if (grantType === 'authorization_code') {
       await handleAuthorizationCodeGrant(config, store, client, req, res);
       return;
@@ -229,17 +236,27 @@ export function createOAuthRouter(config: AuthServiceConfig, store: AuthStore, w
 
   router.post('/oauth/revoke', asyncHandler(async (req, res) => {
     const token = bodyString(req, 'token');
-    if (token) await store.revokeRefreshToken(sha256Base64Url(token));
+    if (token) {
+      if (store.identityAuthority) await store.identityAuthority.revoke(token);
+      else await store.revokeRefreshToken(sha256Base64Url(token));
+    }
     res.status(200).json({ success: true });
   }));
 
   router.post('/logout', asyncHandler(async (req, res) => {
     const token = bodyString(req, 'refresh_token') || bodyString(req, 'token');
-    if (token) await store.revokeRefreshToken(sha256Base64Url(token));
+    if (token) {
+      if (store.identityAuthority) await store.identityAuthority.revoke(token);
+      else await store.revokeRefreshToken(sha256Base64Url(token));
+    }
     res.status(200).json({ success: true });
   }));
 
   router.get('/userinfo', asyncHandler(async (req, res) => {
+    if (store.identityAuthority) {
+      res.json(await store.identityAuthority.userinfo(req.header('authorization')));
+      return;
+    }
     const payload = readAccessToken(config, req);
     if (!payload) {
       res.status(401).json({ error: 'invalid_token' });

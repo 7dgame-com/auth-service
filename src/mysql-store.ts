@@ -8,6 +8,7 @@ import type {
   AuthUser,
   LegacyLoginToken,
   LegacyScanToken,
+  LegacySceneMetadata,
   LegacyWechatLoginResult,
   OAuthAuthorizationCode,
   OAuthRefreshToken,
@@ -17,6 +18,7 @@ import type {
 import type { AuthStore } from './store';
 import { randomToken } from './crypto';
 import { LegacyRedisOpenIdStore } from './legacy-redis';
+import { createHash } from 'crypto';
 
 interface MySqlQueryable {
   execute<T extends QueryResult = RowDataPacket[]>(sql: string, values?: any): Promise<[T, FieldPacket[]]>;
@@ -109,6 +111,8 @@ export class MySqlAuthStore implements AuthStore {
     return this.migrationPromise;
   }
 
+  async close(): Promise<void> { await this.pool.end(); }
+
   async saveLegacyScanToken(token: LegacyScanToken): Promise<void> {
     if (this.legacyRedis) {
       await this.legacyRedis.saveOpenId(token.token, token.openId);
@@ -140,17 +144,34 @@ export class MySqlAuthStore implements AuthStore {
     );
   }
 
+  async saveLegacySceneMetadata(metadata: LegacySceneMetadata): Promise<void> {
+    await this.ensureSchema();
+    // Insert only: a retry or callback must never move the original expiry.
+    await this.pool.execute('INSERT INTO auth_legacy_scene_metadata(scene_digest,provider_app_id,issued_at,expires_at) VALUES(?,?,?,?)',
+      [metadata.sceneDigest, metadata.providerAppId, mysqlDateTime(metadata.issuedAt), mysqlDateTime(metadata.expiresAt)]);
+    await this.legacyRedis?.saveSceneMetadata(metadata);
+  }
+
+  async findLegacySceneMetadata(sceneDigest: string): Promise<LegacySceneMetadata | undefined> {
+    await this.ensureSchema();
+    const [rows] = await this.pool.execute<RowDataPacket[]>('SELECT * FROM auth_legacy_scene_metadata WHERE scene_digest=?', [sceneDigest]);
+    const row = rows[0];
+    return row ? { sceneDigest: row.scene_digest, providerAppId: row.provider_app_id, issuedAt: dateFromRow(row.issued_at), expiresAt: dateFromRow(row.expires_at) } : undefined;
+  }
+
   async findLegacyScanToken(token: string): Promise<LegacyScanToken | undefined> {
     if (this.legacyRedis) {
+      const metadata = await this.findLegacySceneMetadata(createHash('sha256').update(token).digest('hex'));
+      if (metadata && Date.parse(metadata.expiresAt) <= Date.now()) return undefined;
       const openId = await this.legacyRedis.findOpenId(token);
       if (!openId) return undefined;
       const now = new Date().toISOString();
       return {
         token,
-        providerAppId: 'legacy-redis',
+        providerAppId: metadata?.providerAppId || 'legacy-redis',
         openId,
-        expiresAt: '9999-12-31T23:59:59.999Z',
-        createdAt: now,
+        expiresAt: metadata?.expiresAt || '9999-12-31T23:59:59.999Z',
+        createdAt: metadata?.issuedAt || now,
       };
     }
 
@@ -428,6 +449,13 @@ function createPoolOptions(databaseUrl: string): PoolOptions {
 }
 
 async function runMigrations(client: MySqlQueryable): Promise<void> {
+  await client.execute(`CREATE TABLE IF NOT EXISTS auth_legacy_scene_metadata (
+    scene_digest CHAR(64) PRIMARY KEY,
+    provider_app_id VARCHAR(191) NOT NULL,
+    issued_at DATETIME(3) NOT NULL,
+    expires_at DATETIME(3) NOT NULL,
+    KEY auth_legacy_scene_metadata_expiry (expires_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin`);
   await client.execute(`
     CREATE TABLE IF NOT EXISTS wechat (
       id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,

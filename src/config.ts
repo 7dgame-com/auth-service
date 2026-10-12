@@ -26,6 +26,8 @@ export interface RedisConfig {
 }
 
 export interface AuthServiceConfig {
+  dataSource: 'legacy' | 'identity';
+  identityApi?: { baseUrl: string; internalToken: string; timeoutMs: number };
   host: string;
   port: number;
   publicBaseUrl: string;
@@ -50,14 +52,22 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
   const publicBaseUrl = stripTrailingSlash(readString(env, 'AUTH_PUBLIC_BASE_URL', 'http://localhost:3010'));
   const officialToken = readFirstString(env, ['AUTH_WECHAT_OFFICIAL_TOKEN', 'WECHAT_TOKEN']);
   const oauthClients = readOAuthClients(env, publicBaseUrl);
+  const dataSource = readString(env, 'AUTH_DATA_SOURCE', 'legacy');
+  if (dataSource !== 'legacy' && dataSource !== 'identity') throw new Error('AUTH_DATA_SOURCE must be legacy or identity');
+  const identityApi = dataSource === 'identity' ? readIdentityApi(env) : undefined;
+  const allowMockWechat = readBoolean(env, 'AUTH_ALLOW_MOCK_WECHAT', false);
+  if (dataSource === 'identity' && !allowMockWechat && !officialToken) throw new Error('Verified WeChat callbacks require AUTH_WECHAT_OFFICIAL_TOKEN in identity mode');
+  if (dataSource === 'identity' && allowMockWechat && isProduction(env)) throw new Error('Mock WeChat is unavailable in production identity mode');
 
   return {
+    dataSource,
+    identityApi,
     host: readString(env, 'AUTH_SERVICE_HOST', '0.0.0.0'),
     port: readNumber(env, 'AUTH_SERVICE_PORT', 3010),
     publicBaseUrl,
     corsOrigins: readCsv(env, 'AUTH_CORS_ORIGINS', [publicBaseUrl, 'https://bujiaban.com', 'https://3dugc.com']),
-    databaseUrl: readDatabaseUrl(env),
-    redis: readRedisConfig(env),
+    databaseUrl: dataSource === 'legacy' ? readDatabaseUrl(env) : undefined,
+    redis: dataSource === 'legacy' ? readRedisConfig(env) : undefined,
     databaseAutoMigrate: readBoolean(env, 'AUTH_DATABASE_AUTO_MIGRATE', false),
     tokenSecret: readTokenSecret(env),
     accessTokenTtlSeconds: readNumber(env, 'AUTH_ACCESS_TOKEN_TTL_SECONDS', 15 * 60),
@@ -66,7 +76,7 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
     legacyScanTokenTtlSeconds: readNumber(env, 'AUTH_LEGACY_SCAN_TOKEN_TTL_SECONDS', 60 * 60),
     legacyLoginTokenTtlSeconds: readNumber(env, 'AUTH_LEGACY_LOGIN_TOKEN_TTL_SECONDS', 30 * 24 * 60 * 60),
     enableLegacyDebugEndpoints: readBoolean(env, 'AUTH_ENABLE_LEGACY_DEBUG_ENDPOINTS', false),
-    allowMockWechat: readBoolean(env, 'AUTH_ALLOW_MOCK_WECHAT', false),
+    allowMockWechat,
     oauthClients,
     loginEntries: readLoginEntries(env, oauthClients),
     wechat: {
@@ -76,9 +86,20 @@ export function createConfig(env: NodeJS.ProcessEnv = process.env): AuthServiceC
       officialEncodingAesKey: readFirstString(env, ['AUTH_WECHAT_OFFICIAL_AES_KEY', 'WECHAT_AES_KEY']),
       apiBaseUrl: stripTrailingSlash(readString(env, 'AUTH_WECHAT_API_BASE_URL', 'https://api.weixin.qq.com')),
       oauthBaseUrl: stripTrailingSlash(readString(env, 'AUTH_WECHAT_OAUTH_BASE_URL', 'https://open.weixin.qq.com')),
-      signatureRequired: readBoolean(env, 'AUTH_WECHAT_SIGNATURE_REQUIRED', Boolean(officialToken)),
+      signatureRequired: dataSource === 'identity' && !allowMockWechat ? true : readBoolean(env, 'AUTH_WECHAT_SIGNATURE_REQUIRED', Boolean(officialToken)),
     },
   };
+}
+
+function readIdentityApi(env: NodeJS.ProcessEnv): NonNullable<AuthServiceConfig['identityApi']> {
+  const baseUrl = readOptionalString(env, 'AUTH_IDENTITY_API_BASE_URL');
+  const internalToken = readOptionalString(env, 'AUTH_IDENTITY_API_TOKEN');
+  if (!baseUrl || !internalToken) throw new Error('AUTH_IDENTITY_API_BASE_URL and AUTH_IDENTITY_API_TOKEN are required in identity mode');
+  const url = new URL(baseUrl);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error('AUTH_IDENTITY_API_BASE_URL must be an HTTP service URL without credentials');
+  }
+  return { baseUrl: stripTrailingSlash(baseUrl), internalToken, timeoutMs: readNumber(env, 'AUTH_IDENTITY_API_TIMEOUT_MS', 5000) };
 }
 
 function readOAuthClients(env: NodeJS.ProcessEnv, publicBaseUrl: string): OAuthClient[] {

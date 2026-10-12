@@ -7,6 +7,7 @@ import { yiiRedisOpenIdKey } from '../src/legacy-redis';
 import { createApp } from '../src/server';
 import { MemoryAuthStore } from '../src/memory-store';
 import { WechatClient } from '../src/wechat-client';
+import { sceneDigest } from '../src/legacy-routes';
 
 interface StartedApp {
   baseUrl: string;
@@ -114,6 +115,12 @@ describe('unified auth service', () => {
     const qrcode = await qrcodeResponse.json() as { success: boolean; message: string; token: string };
     expect(qrcode).toMatchObject({ success: true, message: 'create qrcode' });
     expect(qrcode.token).toBeTruthy();
+    const metadata = await store.findLegacySceneMetadata(sceneDigest(qrcode.token));
+    expect(metadata).toMatchObject({ sceneDigest: sceneDigest(qrcode.token), providerAppId: 'wx-test' });
+    expect(Date.parse(metadata!.expiresAt) - Date.parse(metadata!.issuedAt)).toBe(config.legacyScanTokenTtlSeconds * 1000);
+    expect(await store.findLegacyScanToken(qrcode.token)).toBeUndefined();
+    const pending = await fetch(`${app.baseUrl}/v1/wechat/refresh?token=${encodeURIComponent(qrcode.token)}`);
+    expect(await pending.json()).toMatchObject({ success: false, message: 'token not found' });
 
     const pushResponse = await fetch(`${app.baseUrl}/v1/wechat`, {
       method: 'POST',
@@ -121,6 +128,7 @@ describe('unified auth service', () => {
       body: createWechatEventXml(qrcode.token, 'openid-1'),
     });
     expect(await pushResponse.text()).toContain('欢迎登陆平台');
+    expect(await store.findLegacyScanToken(qrcode.token)).toMatchObject({ expiresAt: metadata!.expiresAt, createdAt: metadata!.issuedAt });
 
     const refreshResponse = await fetch(`${app.baseUrl}/v1/wechat/refresh?token=${encodeURIComponent(qrcode.token)}`);
     const refresh = await refreshResponse.json() as { success: boolean; message: string; token: string };
@@ -133,6 +141,22 @@ describe('unified auth service', () => {
     const secondRefresh = await secondRefreshResponse.json() as { success: boolean; message: string; token: string };
     expect(secondRefresh.success).toBe(true);
     expect(secondRefresh.message).toBe('signin');
+  });
+
+  it('keeps issued scene expiry immutable and never revives an expired QR on a callback', async () => {
+    const config = createConfig({ AUTH_ALLOW_MOCK_WECHAT: 'true', AUTH_WECHAT_SIGNATURE_REQUIRED: 'false', AUTH_WECHAT_OFFICIAL_APP_ID: 'wx-test', AUTH_TOKEN_SECRET: 'test-secret' });
+    const store = new MemoryAuthStore(), app = await startApp(config, store);
+    const issuedAt = new Date(Date.now() - 120000).toISOString(), expiresAt = new Date(Date.now() - 60000).toISOString();
+    const metadata = { sceneDigest: sceneDigest('expired-scene'), providerAppId: 'wx-test', issuedAt, expiresAt };
+    await store.saveLegacySceneMetadata(metadata);
+    await expect(store.saveLegacySceneMetadata({ ...metadata, expiresAt: new Date(Date.now() + 3600000).toISOString() })).rejects.toThrow('already exists');
+    const response = await fetch(`${app.baseUrl}/v1/wechat`, { method: 'POST', headers: { 'content-type': 'application/xml' }, body: createWechatEventXml('expired-scene', 'expired-openid') });
+    expect(response.status).toBe(200); expect(await store.findLegacyScanToken('expired-scene')).toBeUndefined();
+    expect(await store.findLegacySceneMetadata(metadata.sceneDigest)).toEqual(metadata);
+    // Scenes issued before this baseline version remain compatible, without fabricated issuance evidence.
+    await fetch(`${app.baseUrl}/v1/wechat`, { method: 'POST', headers: { 'content-type': 'application/xml' }, body: createWechatEventXml('pre-baseline-scene', 'old-openid') });
+    expect(await store.findLegacyScanToken('pre-baseline-scene')).toMatchObject({ openId: 'old-openid' });
+    expect(await store.findLegacySceneMetadata(sceneDigest('pre-baseline-scene'))).toBeUndefined();
   });
 
   it('verifies the WeChat server check endpoint with the configured token', async () => {

@@ -1,4 +1,5 @@
 import express, { Router, type Request, type Response } from 'express';
+import { createHash } from 'crypto';
 import type { AuthServiceConfig } from './config';
 import {
   createWechatMessageSignature,
@@ -40,8 +41,16 @@ export function createLegacyWechatRouter(config: AuthServiceConfig, store: AuthS
   }));
 
   router.get('/wechat/qrcode', asyncHandler(async (_req, res) => {
+    if (store.identityAuthority) {
+      res.json(await store.identityAuthority.request('/v1/wechat/qrcode'));
+      return;
+    }
     const token = randomToken(24);
+    const issuedAt = new Date();
     const qrcode = await wechat.createTemporaryQrCode(token, config.legacyScanTokenTtlSeconds);
+    if (!Number.isSafeInteger(qrcode.expire_seconds) || qrcode.expire_seconds <= 0) throw new Error('WeChat QR expiry is invalid');
+    await store.saveLegacySceneMetadata({ sceneDigest: sceneDigest(token), providerAppId: config.wechat.officialAppId || 'unknown',
+      issuedAt: issuedAt.toISOString(), expiresAt: addSeconds(issuedAt, qrcode.expire_seconds) });
     res.json({ success: true, message: 'create qrcode', qrcode, token });
   }));
 
@@ -49,6 +58,10 @@ export function createLegacyWechatRouter(config: AuthServiceConfig, store: AuthS
     const token = typeof req.query.token === 'string' ? req.query.token : '';
     if (!token) {
       res.status(400).json({ success: false, message: 'token required' });
+      return;
+    }
+    if (store.identityAuthority) {
+      res.json(await store.identityAuthority.request(`/v1/wechat/refresh?token=${encodeURIComponent(token)}`));
       return;
     }
 
@@ -106,19 +119,25 @@ async function handleWechatEvent(config: AuthServiceConfig, store: AuthStore, me
     const token = normalizeSceneToken(message.EventKey || '');
     if (token) {
       const now = new Date();
+      const metadata = store.identityAuthority ? undefined : await store.findLegacySceneMetadata(sceneDigest(token));
+      // Old scenes without issuance evidence remain compatible until the documented baseline drain.
+      // Known scenes keep their original lifetime; a delayed callback cannot revive or extend one.
+      if (metadata && (Date.parse(metadata.expiresAt) <= now.getTime() || metadata.providerAppId !== (config.wechat.officialAppId || 'unknown'))) return '欢迎登陆平台，祝你永不加班～';
       await store.saveLegacyScanToken({
         token,
         providerAppId: config.wechat.officialAppId || 'unknown',
         openId: message.FromUserName,
         scene: token,
-        expiresAt: addSeconds(now, config.legacyScanTokenTtlSeconds),
-        createdAt: now.toISOString(),
+        expiresAt: metadata?.expiresAt || addSeconds(now, config.legacyScanTokenTtlSeconds),
+        createdAt: metadata?.issuedAt || now.toISOString(),
       });
     }
     return '欢迎登陆平台，祝你永不加班～';
   }
   return message.MsgType === 'text' ? '感谢您的关注' : '扫描二维码';
 }
+
+export function sceneDigest(scene: string): string { return createHash('sha256').update(scene).digest('hex'); }
 
 function handleWechatCheck(config: AuthServiceConfig, req: Request, res: Response): void {
   const signature = queryString(req, 'signature');

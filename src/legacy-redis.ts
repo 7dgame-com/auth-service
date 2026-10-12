@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import net from 'net';
 import tls from 'tls';
 import type { RedisConfig } from './config';
+import type { LegacySceneMetadata } from './types';
 
 const OPEN_ID_INDEX_KEY = 'open_id';
 const REDIS_TIMEOUT_MS = 5000;
@@ -15,6 +16,14 @@ interface ParsedRedisValue {
 
 export class LegacyRedisOpenIdStore {
   constructor(private readonly config: RedisConfig) {}
+
+  async saveSceneMetadata(metadata: LegacySceneMetadata): Promise<void> {
+    // Atomically preserve immutable issuance evidence and its original absolute expiry.
+    const script = "if redis.call('EXISTS',KEYS[1])==1 then return 0 end redis.call('HSET',KEYS[1],'scene_digest',ARGV[1],'provider_app_id',ARGV[2],'issued_at',ARGV[3],'expires_at',ARGV[4]) redis.call('PEXPIREAT',KEYS[1],ARGV[5]) return 1";
+    const [created] = await executeRedisCommands(this.config, [['EVAL', script, '1', legacySceneMetadataKey(metadata.sceneDigest),
+      metadata.sceneDigest, metadata.providerAppId, metadata.issuedAt, metadata.expiresAt, String(Date.parse(metadata.expiresAt))]]);
+    if (created !== 1) throw new Error('Scene issuance already exists');
+  }
 
   async saveOpenId(token: string, openId: string): Promise<void> {
     const primaryKey = yiiRedisBuildKey(token);
@@ -31,6 +40,8 @@ export class LegacyRedisOpenIdStore {
     return typeof openId === 'string' && openId ? openId : undefined;
   }
 }
+
+export function legacySceneMetadataKey(sceneDigest: string): string { return `identity:legacy_scene:${sceneDigest}`; }
 
 export function yiiRedisOpenIdKey(token: string): string {
   return `${OPEN_ID_INDEX_KEY}:a:${yiiRedisBuildKey(token)}`;

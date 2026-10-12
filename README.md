@@ -1,5 +1,24 @@
 # Unified Auth Service
 
+## Identity authority 与二维码迁移基线
+
+`AUTH_DATA_SOURCE=identity` 时，此服务仅验证微信 provider 回调并调用 Identity API；账户、绑定、令牌和二维码状态均由 Identity 私库管理，不创建旧 MySQL/Redis store。
+
+最终切换前，旧模式的所有实例必须先运行包含发行记录的兼容版本，持续至少实际最大二维码有效期，然后短暂停止发行与回调、导出最终快照。`GET /v1/wechat/qrcode` 会在返回原响应前写入 `auth_legacy_scene_metadata(scene_digest,provider_app_id,issued_at,expires_at)`；摘要为原 scene 的 SHA256 hex，时间按 UTC DATETIME(3) 保存。发行时间取 provider 请求前的时间，过期时间使用 provider 返回的有效期，避免网络延迟延长原二维码寿命。该记录不表示已扫码，`refresh` 对未扫码的 scene 仍返回原来的 `token not found`。
+
+配置旧 Redis 时，还写入 `identity:legacy_scene:<scene_digest>` hash，字段同 SQL，时间为 UTC ISO 字符串，通过原始绝对毫秒时间 `PEXPIREAT` 过期。回调保留首次发行的过期时间；已过期 scene 不会复活。基线版本之前且没有记录的 scene 保留旧行为，但离线导入不得凭空推算其 TTL。
+
+基线部署前显式运行 schema migration（`AUTH_DATABASE_AUTO_MIGRATE=true` 或独立迁移流程）。SQL 导出应将时间格式化为明确的 UTC，且不包含密码/刷新令牌：
+
+```sql
+SET time_zone = '+00:00';
+SELECT scene_digest, provider_app_id,
+  DATE_FORMAT(issued_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS issued_at,
+  DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%s.%fZ') AS expires_at
+FROM auth_legacy_scene_metadata
+WHERE expires_at > UTC_TIMESTAMP(3);
+```
+
 这是一个独立部署的统一登录中心，用新的 Node.js 22 + TypeScript 技术栈替代旧的 `gdgeek/auth` Yii2 实现。
 
 第一阶段目标不是做一个只服务 `bujiaban.com` 的专用登录服务，而是先兼容 `bujiaban.com` 当前依赖的旧接口，再把底层模型升级成通用身份中心，供 `bujiaban.com`、`3dugc.com` 和后续其他服务复用。

@@ -32,6 +32,14 @@ export interface LegacyScanToken {
   createdAt: string;
 }
 
+/** Issuance evidence only. Its presence never proves the QR was scanned. */
+export interface LegacySceneMetadata {
+  sceneDigest: string;
+  providerAppId: string;
+  issuedAt: string;
+  expiresAt: string;
+}
+
 export interface LegacyLoginToken {
   tokenHash: string;
   userId: string;

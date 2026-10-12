@@ -5,6 +5,7 @@ import type {
   AuthUser,
   LegacyLoginToken,
   LegacyScanToken,
+  LegacySceneMetadata,
   LegacyWechatLoginResult,
   OAuthAuthorizationCode,
   OAuthRefreshToken,
@@ -25,6 +26,7 @@ export class MemoryAuthStore implements AuthStore {
   private readonly users = new Map<string, AuthUser>();
   private readonly identities = new Map<string, AuthIdentity>();
   private readonly scanTokens = new Map<string, LegacyScanToken>();
+  private readonly sceneMetadata = new Map<string, LegacySceneMetadata>();
   private readonly legacyWechatRows = new Map<string, LegacyWechatRow>();
   private readonly legacyLoginTokens = new Map<string, LegacyLoginToken>();
   private readonly authorizationCodes = new Map<string, OAuthAuthorizationCode>();
@@ -36,6 +38,16 @@ export class MemoryAuthStore implements AuthStore {
 
   async saveLegacyScanToken(token: LegacyScanToken): Promise<void> {
     this.scanTokens.set(token.token, token);
+  }
+
+  async saveLegacySceneMetadata(metadata: LegacySceneMetadata): Promise<void> {
+    if (this.sceneMetadata.has(metadata.sceneDigest)) throw new Error('Scene issuance already exists');
+    this.sceneMetadata.set(metadata.sceneDigest, { ...metadata });
+  }
+
+  async findLegacySceneMetadata(sceneDigest: string): Promise<LegacySceneMetadata | undefined> {
+    const metadata = this.sceneMetadata.get(sceneDigest);
+    return metadata ? { ...metadata } : undefined;
   }
 
   async findLegacyScanToken(token: string): Promise<LegacyScanToken | undefined> {

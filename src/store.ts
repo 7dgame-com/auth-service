@@ -2,15 +2,20 @@ import type {
   AuthUser,
   LegacyLoginToken,
   LegacyScanToken,
+  LegacySceneMetadata,
   LegacyWechatLoginResult,
   OAuthAuthorizationCode,
   OAuthRefreshToken,
   UpsertIdentityResult,
   WechatProfile,
 } from './types';
+import type { IdentityAuthority } from './identity-authority';
 
 export interface AuthStore {
+  readonly identityAuthority?: IdentityAuthority;
   migrate(): Promise<void>;
+  saveLegacySceneMetadata(metadata: LegacySceneMetadata): Promise<void>;
+  findLegacySceneMetadata(sceneDigest: string): Promise<LegacySceneMetadata | undefined>;
   saveLegacyScanToken(token: LegacyScanToken): Promise<void>;
   findLegacyScanToken(token: string): Promise<LegacyScanToken | undefined>;
   upsertWechatIdentity(profile: WechatProfile): Promise<UpsertIdentityResult>;

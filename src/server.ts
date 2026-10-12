@@ -11,6 +11,8 @@ import { createOAuthRouter } from './oauth-routes';
 import type { AuthStore } from './store';
 import { WechatClient } from './wechat-client';
 import logger from './logger';
+import { IdentityAuthStore, IdentityAuthorityError } from './identity-authority';
+import { constantTimeSecretEqual } from './crypto';
 
 export interface AuthServiceRuntime {
   app: Express;
@@ -45,11 +47,32 @@ export function createApp(config: AuthServiceConfig, store: AuthStore, wechat: W
       status: 'ok',
       service: 'unified-auth-service',
       timestamp: new Date().toISOString(),
-      database: config.databaseUrl ? 'mysql' : 'memory',
+      database: config.dataSource === 'identity' ? 'identity-api' : config.databaseUrl ? 'mysql' : 'memory',
       redis: config.redis ? 'configured' : 'disabled',
       wechatOfficialAppIdConfigured: Boolean(config.wechat.officialAppId),
       wechatOfficialSecretConfigured: Boolean(config.wechat.officialAppSecret),
     });
+  });
+
+  const internalProvider: express.RequestHandler = (req, res, next) => {
+    if (config.dataSource !== 'identity' || !constantTimeSecretEqual(config.identityApi?.internalToken, req.header('x-identity-internal-token'))) {
+      res.status(401).json({ error: 'unauthorized' }); return;
+    }
+    next();
+  };
+  app.post('/internal/wechat-provider/qrcode', internalProvider, (req, res, next) => {
+    const scene = req.body?.scene; const ttl = req.body?.lifetimeSeconds;
+    if (typeof scene !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(scene) || !Number.isSafeInteger(ttl) || ttl < 1 || ttl > 2592000) {
+      res.status(400).json({ error: 'invalid_request' }); return;
+    }
+    wechat.createTemporaryQrCode(scene, ttl).then((qrcode) => res.json(qrcode)).catch(next);
+  });
+  app.post('/internal/wechat-provider/profile', internalProvider, (req, res, next) => {
+    const openId = req.body?.openId;
+    if (typeof openId !== 'string' || openId.length < 1 || openId.length > 191) {
+      res.status(400).json({ error: 'invalid_request' }); return;
+    }
+    wechat.getOfficialUserInfo(openId).then((profile) => res.json(profile)).catch(next);
   });
 
   app.use('/v1', createLegacyWechatRouter(config, store, wechat));
@@ -60,6 +83,10 @@ export function createApp(config: AuthServiceConfig, store: AuthStore, wechat: W
   });
 
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (error instanceof IdentityAuthorityError) {
+      if (!res.headersSent) res.status(error.status).json(error.body);
+      return;
+    }
     logger.error({ error }, 'Auth service request failed');
     if (res.headersSent) return;
     res.status(500).json({
@@ -72,6 +99,10 @@ export function createApp(config: AuthServiceConfig, store: AuthStore, wechat: W
 }
 
 function createStore(config: AuthServiceConfig): AuthStore {
+  if (config.dataSource === 'identity') {
+    if (!config.identityApi) throw new Error('Identity API is required in identity mode');
+    return new IdentityAuthStore(config.identityApi);
+  }
   return config.databaseUrl
     ? new MySqlAuthStore(config.databaseUrl, { autoMigrate: config.databaseAutoMigrate, legacyRedis: config.redis })
     : new MemoryAuthStore();
